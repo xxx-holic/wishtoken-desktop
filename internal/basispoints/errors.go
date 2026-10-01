@@ -10,6 +10,7 @@ import (
 const (
 	CategoryToolHistory  = "tool_history"
 	CategoryImageInput   = "image_input"
+	CategoryImageLimit   = "image_limit"
 	CategoryToolChoice   = "tool_choice"
 	CategoryToolCatalog  = "tool_catalog"
 	CategoryHistoryRef   = "history_reference"
@@ -46,7 +47,8 @@ func Category(err error) string {
 
 var userMessages = map[string]string{
 	CategoryToolHistory:  "工具调用历史不完整：本次请求里的工具结果找不到对应的原始工具调用（重启、换号或会话过长会让缓存失效），请新建会话后重试。 / Tool history is incomplete; start a new conversation.",
-	CategoryImageInput:   "Basispoints 渠道只支持 HTTPS 图片链接、内嵌 base64 图片（自动上传为附件）和本桥生成的附件 ID。 / Unsupported image reference for Basispoints.",
+	CategoryImageInput:   "图片参数无效：支持 HTTPS 链接、base64 图片或 BPS 附件 ID，清晰度为 auto、low、high 或 original。 / Invalid Basispoints image input.",
+	CategoryImageLimit:   "整段会话的图片超过本地桥接容量，请压缩图片或压缩会话历史后重试。 / Conversation images exceed a local bridge limit.",
 	CategoryToolChoice:   "Basispoints 渠道只支持 tool_choice 为 auto 或 none。 / Basispoints supports tool_choice auto or none only.",
 	CategoryToolCatalog:  "工具声明无法经 Basispoints 转发：只支持带名称的 function / custom 客户端工具。 / Only named function/custom client tools are supported.",
 	CategoryHistoryRef:   "Basispoints 需要完整对话历史，不支持 previous_response_id 或 item_reference。 / Basispoints needs the expanded history.",

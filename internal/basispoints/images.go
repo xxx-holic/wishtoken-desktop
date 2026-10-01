@@ -14,9 +14,12 @@ import (
 )
 
 const (
-	maxInlineImageBytes    = 20 << 20
-	maxInlineImagesPerCall = 20
-	maxInlineRequestBytes  = 32 << 20
+	maxInlineImageBytes = 20 << 20
+	// Bound the full replay, including tool screenshots, without imposing the
+	// old 20-upload limit on a conversation's accumulated image history.
+	maxImagesPerCall      = 1500
+	maxInlineRequestBytes = 32 << 20
+	maxParallelUploads    = 4
 )
 
 // validateImage checks one input_image part. Message images must be HTTPS
@@ -53,9 +56,9 @@ func validateImage(part object, toolOutput bool, toolImages map[string]bool) err
 func validateDetail(part object) error {
 	if detail, exists := part["detail"]; exists && detail != nil {
 		switch text(detail) {
-		case "auto", "low", "high":
+		case "auto", "low", "high", "original":
 		default:
-			return prepareErr(CategoryImageInput, "image detail must be auto, low or high")
+			return prepareErr(CategoryImageInput, "image detail must be auto, low, high or original")
 		}
 	}
 	return nil
@@ -120,7 +123,8 @@ func PlanImages(raw []byte) (*ImagePlan, error) {
 	}
 	plan := &ImagePlan{source: source, raw: raw}
 	input, _ := source["input"].([]any)
-	var total int
+	var total, count int
+	decoded := make(map[string]Attachment)
 	for _, entry := range input {
 		item, _ := entry.(object)
 		field := ""
@@ -138,23 +142,37 @@ func PlanImages(raw []byte) (*ImagePlan, error) {
 			if text(part["type"]) != "input_image" {
 				continue
 			}
+			count++
+			if count > maxImagesPerCall {
+				return nil, prepareErr(CategoryImageLimit, "full conversation exceeds the bridge limit of %d images (including tool screenshots)", maxImagesPerCall)
+			}
+			if err := validateDetail(part); err != nil {
+				return nil, err
+			}
 			rawURL := text(part["image_url"])
 			if !IsDataURL(rawURL) {
+				if err := validateImage(part, field == "output", nil); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if _, exists := part["file_id"]; exists {
 				return nil, prepareErr(CategoryImageInput, "input_image requires exactly one image reference")
 			}
-			if len(plan.parts) >= maxInlineImagesPerCall {
-				return nil, prepareErr(CategoryImageInput, "at most %d inline images per request", maxInlineImagesPerCall)
-			}
-			attachment, err := decodeDataURL(rawURL)
-			if err != nil {
-				return nil, err
+			// Decode a repeated history image only once. Keep every reference
+			// and still charge each occurrence against the request byte budget.
+			attachment, exists := decoded[rawURL]
+			if !exists {
+				var err error
+				attachment, err = decodeDataURL(rawURL)
+				if err != nil {
+					return nil, err
+				}
+				decoded[rawURL] = attachment
 			}
 			total += len(attachment.Data)
 			if total > maxInlineRequestBytes {
-				return nil, prepareErr(CategoryImageInput, "inline images exceed the 32 MiB request limit")
+				return nil, prepareErr(CategoryImageLimit, "inline images in the full conversation exceed the bridge's 32 MiB decoded request limit")
 			}
 			if part["detail"] == nil {
 				part["detail"] = "auto"
@@ -195,19 +213,60 @@ func (p *ImagePlan) Apply(ctx context.Context, cache *AttachmentCache, scope str
 	if len(p.parts) == 0 {
 		return p.raw, nil
 	}
-	ids := make(map[[32]byte]string)
+	type attachmentKey struct {
+		mime   string
+		digest [32]byte
+	}
+	indices := make(map[attachmentKey]int)
+	var unique []Attachment
 	for _, part := range p.parts {
-		id := ids[part.attachment.Digest]
-		if id == "" {
-			var err error
-			id, err = cache.get(ctx, scope, part.attachment, upload)
-			if err != nil {
-				return nil, err
-			}
-			ids[part.attachment.Digest] = id
+		key := attachmentKey{part.attachment.MIME, part.attachment.Digest}
+		if _, exists := indices[key]; !exists {
+			indices[key] = len(unique)
+			unique = append(unique, part.attachment)
 		}
+	}
+	// Bound parallel uploads to keep long image histories responsive. Do not
+	// rewrite any reference until all uploads succeed; a failed plan is retryable.
+	uploadCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ids := make([]string, len(unique))
+	jobs := make(chan int, len(unique))
+	for i := range unique {
+		jobs <- i
+	}
+	close(jobs)
+	var wg sync.WaitGroup
+	var firstError sync.Once
+	var uploadErr error
+	for range min(maxParallelUploads, len(unique)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if uploadCtx.Err() != nil {
+					return
+				}
+				id, err := cache.get(uploadCtx, scope, unique[i], upload)
+				if err != nil {
+					firstError.Do(func() { uploadErr = err; cancel() })
+					return
+				}
+				ids[i] = id
+			}
+		}()
+	}
+	wg.Wait()
+	if uploadErr != nil {
+		return nil, uploadErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for _, part := range p.parts {
+		key := attachmentKey{part.attachment.MIME, part.attachment.Digest}
 		delete(part.part, "image_url")
-		part.part["file_id"] = id
+		part.part["file_id"] = ids[indices[key]]
 	}
 	return json.Marshal(p.source)
 }
@@ -229,7 +288,7 @@ func decodeDataURL(raw string) (Attachment, error) {
 		return Attachment{}, prepareErr(CategoryImageInput, "inline images must be PNG, JPEG, GIF or WebP")
 	}
 	if len(payload) > base64.StdEncoding.EncodedLen(maxInlineImageBytes) {
-		return Attachment{}, prepareErr(CategoryImageInput, "inline image exceeds the 20 MiB limit")
+		return Attachment{}, prepareErr(CategoryImageLimit, "inline image exceeds the bridge's 20 MiB per-image limit")
 	}
 	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(payload))
 	if err != nil {
@@ -240,6 +299,9 @@ func decodeDataURL(raw string) (Attachment, error) {
 	}
 	if len(data) == 0 {
 		return Attachment{}, prepareErr(CategoryImageInput, "inline image is empty")
+	}
+	if len(data) > maxInlineImageBytes {
+		return Attachment{}, prepareErr(CategoryImageLimit, "inline image exceeds the bridge's 20 MiB per-image limit")
 	}
 	return Attachment{MIME: declared, Data: data, Digest: sha256.Sum256(data)}, nil
 }

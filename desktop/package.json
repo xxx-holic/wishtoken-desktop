@@ -1,6 +1,6 @@
 {
   "name": "wishtoken-desktop",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "private": true,
   "description": "WishToken companion for local Codex accounts, explicit channels and existing workspaces",
   "main": "main.cjs",
