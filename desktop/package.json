@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
-    "electron": "44.5.0",
+    "electron": "44.5.1",
     "electron-builder": "26.15.3"
   },
   "productName": "WishToken Desktop",
