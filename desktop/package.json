@@ -18,7 +18,7 @@
     "smoke": "node test/features-smoke.cjs"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0",
+    "@playwright/test": "1.64.1",
     "electron": "44.5.0",
     "electron-builder": "26.15.3"
   },
