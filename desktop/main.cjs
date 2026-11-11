@@ -7,10 +7,12 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { BridgeService, atomicJSON } = require('./lib/service.cjs');
-const { requireID, cleanLaunch, cleanSettings, cleanChannel, safeError } = require('./lib/policy.cjs');
+const { requireID, cleanLaunch, cleanSettings, cleanChannel, prismURL, safeError } = require('./lib/policy.cjs');
 const appRuntime = require('./lib/codex-app.cjs');
 const mainProfile = require('./lib/main-profile.cjs');
 const { Pelican, DEFAULT_PROMPT } = require('./lib/pelican.cjs');
+const { CANDY_PROMPT } = require('./lib/benchmarks.cjs');
+const { Work } = require('./lib/work.cjs');
 const { externalLink } = require('./lib/links.cjs');
 
 const dataHome = process.env.GPTBRIDGE_DESKTOP_HOME || path.join(os.homedir(), '.gptbridge-desktop');
@@ -20,7 +22,7 @@ app.setPath('userData', path.join(dataHome, 'shell'));
 app.setAppUserModelId('app.gptbridge.team');
 const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
-let window, tray, service, pelican, codexApp, quitting = false, allowQuit = false;
+let window, tray, service, pelican, work, codexApp, quitting = false, allowQuit = false;
 const page = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href;
 const prefsPath = path.join(dataHome, 'desktop.json');
 let prefs = {};
@@ -42,8 +44,15 @@ async function requestQuit() {
   const result = await dialog.showMessageBox(window, { type: 'question', title: '退出 WishToken Desktop', message: '退出将停止本地服务', detail: '正在运行的 Codex 将无法继续请求。只想隐藏窗口，请选择“留在后台”。', buttons: ['留在后台', '退出客户端'], defaultId: 0, cancelId: 0 });
   if (result.response === 0) { window.hide(); return; }
   quitting = true;
+  if (prefs.restore_on_exit !== false) {
+    try { mainProfile.restoreManaged(dataHome, primaryHome); }
+    catch (error) {
+      if (!/没有可恢复|不一致|备份不存在|config.toml 不存在/.test(safeError(error))) dialog.showErrorBox('恢复 Codex 配置失败', safeError(error));
+    }
+  }
   await pelican?.close();
   await service?.stop();
+  await work?.close();
   allowQuit = true;
   app.quit();
 }
@@ -66,23 +75,23 @@ async function importPaths(paths) {
 }
 function validSender(event) { return event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame && event.senderFrame?.url === page; }
 async function confirmMainRestart(restore) {
-  const result = await dialog.showMessageBox(window, { type: 'question', title: restore ? '恢复主应用配置' : '切换主 Codex App', message: restore ? '恢复首次接管前的配置并重新打开 Codex？' : '切换账号需要重启主 Codex App', detail: '请先保存正在运行的任务，重启会中断进行中的请求。原有项目、已保存的会话和应用数据目录会继续保留。' + (restore ? '' : '\n首次切换会备份原配置，可在设置中恢复。'), buttons: ['取消', restore ? '恢复并打开' : '切换并重启'], defaultId: 0, cancelId: 0 });
+  const result = await dialog.showMessageBox(window, { type: 'question', title: restore ? '恢复主应用配置' : '切换主 Codex App', message: restore ? '还原接管前的 Codex 配置并重新打开 Codex？' : '切换账号需要重启主 Codex App', detail: restore ? '只还原模型、供应商和目录等接管字段；之后新增的项目、插件、MCP 和服务设置会保留。请先保存正在运行的任务。' : '请先保存正在运行的任务，重启会中断进行中的请求。原有项目、已保存的会话和应用数据目录会继续保留。\n首次切换会备份原配置，可在设置中恢复。', buttons: ['取消', restore ? '还原并打开' : '切换并重启'], defaultId: 0, cancelId: 0 });
   return result.response === 1;
 }
 async function handle(method, input) {
   switch (method) {
     case 'snapshot': {
       const [status, accounts, codex, models, settings] = await Promise.all(['/api/status', '/api/accounts', '/api/codex/launch', '/api/models', '/api/settings'].map(route => service.request(route)));
-      return { status, accounts: accounts.accounts, codex: { ...codex, app: codexApp, main_app: mainProfile.status(dataHome, primaryHome) }, models, settings: { proxy_url: settings.proxy_url, auto_refresh: settings.auto_refresh, usage_probe: settings.usage_probe }, preferences: prefs, platform: process.platform, version: app.getVersion() };
+      return { status, accounts: accounts.accounts, codex: { ...codex, app: codexApp, main_app: mainProfile.status(dataHome, primaryHome) }, models, settings: { proxy_url: settings.proxy_url, bps_transport: settings.bps_transport, auto_refresh: settings.auto_refresh, usage_probe: settings.usage_probe }, preferences: prefs, platform: process.platform, version: app.getVersion() };
     }
     case 'importFiles': {
-      const result = await dialog.showOpenDialog(window, { title: '导入 Team 子号 JSON', properties: ['openFile', 'multiSelections'], filters: [{ name: '账号 JSON', extensions: ['json'] }] });
+      const result = await dialog.showOpenDialog(window, { title: '导入账号 JSON', properties: ['openFile', 'multiSelections'], filters: [{ name: '账号 JSON', extensions: ['json'] }] });
       return result.canceled ? null : importPaths(result.filePaths);
     }
     case 'importPaths': return importPaths(input);
     case 'importText':
       if (typeof input !== 'string' || Buffer.byteLength(input) > 16 * 1024 * 1024) throw new Error('JSON 内容为空或过大');
-      JSON.parse(input);
+      try { JSON.parse(input); } catch { throw new Error('JSON 格式不正确，请检查括号、引号和逗号。'); }
       return service.request('/api/accounts/import', 'POST', input, 90000);
     case 'chooseFolder': {
       const result = await dialog.showOpenDialog(window, { title: '选择 Codex 项目目录', defaultPath: prefs.directory || os.homedir(), properties: ['openDirectory', 'createDirectory'] });
@@ -142,13 +151,12 @@ async function handle(method, input) {
       if (switchingApp) throw new Error('正在切换 Codex，请等待完成');
       switchingApp = true;
       try {
-        mainProfile.checkRestore(dataHome, primaryHome);
         codexApp = await appRuntime.discoverApp(prefs.app_path);
         if (!codexApp.installed) throw new Error(codexApp.error);
         const processes = await appRuntime.mainProcesses(codexApp.binary);
         if (!(await confirmMainRestart(true))) return { cancelled: true };
         await appRuntime.closeMainProcesses(codexApp.binary, processes);
-        const result = mainProfile.restore(dataHome, primaryHome);
+        const result = mainProfile.restoreManaged(dataHome, primaryHome);
         try { await appRuntime.launchApp(codexApp.binary, primaryHome, service.config.api_key, path.join(dataHome, 'config.json'), 'main'); }
         catch (error) { result.warning = '原配置已恢复，请手动打开 Codex App：' + safeError(error); }
         return result;
@@ -165,7 +173,16 @@ async function handle(method, input) {
       const binary = appRuntime.appExecutable(result.filePaths[0]); if (!binary) throw new Error('请选择 Codex/ChatGPT 应用，或其完整安装目录内的图形主程序');
       prefs.app_path = binary; savePrefs(); codexApp = await appRuntime.discoverApp(binary); return codexApp;
     }
-    case 'pelicanHistory': return { batches: pelican.snapshot(), default_prompt: DEFAULT_PROMPT };
+    case 'workStatus': return work.snapshot();
+    case 'workTabs': return work.tabs(input);
+    case 'workOpen': return work.open(requireID(input));
+    case 'workUnbind': return work.unbind(requireID(input));
+    case 'workBind': {
+      requireID(input?.account_id);
+      const { accounts } = await service.request('/api/accounts');
+      return work.bind(input,accounts.find(a=>a.id===input.account_id));
+    }
+    case 'pelicanHistory': return { batches: pelican.snapshot(), default_prompt: DEFAULT_PROMPT, candy_prompt:CANDY_PROMPT };
     case 'pelicanStart': {
       const { accounts } = await service.request('/api/accounts');
       return pelican.start(input, accounts);
@@ -175,13 +192,15 @@ async function handle(method, input) {
     case 'pelicanSource': return pelican.artifact(input).text;
     case 'pelicanExport': {
       const artifact = pelican.artifact(input);
-      const result = await dialog.showSaveDialog(window, { title: '保存鹈鹕动画 HTML', defaultPath: 'pelican.html', filters: [{ name: 'HTML', extensions: ['html'] }] });
+      const candy = artifact.benchmark === 'candy';
+      const result = await dialog.showSaveDialog(window, { title: candy ? '保存糖果题回答' : '保存鹈鹕动画 HTML', defaultPath: candy ? 'candy-answer.txt' : 'pelican.html', filters: [{ name: candy ? '文本' : 'HTML', extensions: [candy ? 'txt' : 'html'] }] });
       if (result.canceled) return false;
-      await fsp.writeFile(result.filePath, artifact.html, { encoding: 'utf8', mode: 0o600 }); return true;
+      await fsp.writeFile(result.filePath, candy ? artifact.text : artifact.html, { encoding: 'utf8', mode: 0o600 }); return true;
     }
     case 'test': {
       requireID(input?.account_id);
-      if (typeof input.model !== 'string' || !['low', 'medium', 'high', 'xhigh'].includes(input.effort)) throw new Error('测试参数无效');
+      if (typeof input.model !== 'string' || !['low', 'medium', 'high', 'xhigh', 'max'].includes(input.effort)) throw new Error('测试参数无效');
+      if (input.channel !== 'work' && input.effort === 'max') throw new Error('仅 Work 通道支持 max 推理档位');
       return service.request('/api/test', 'POST', { account_id: input.account_id, model: input.model, effort: input.effort, route: cleanChannel(input.channel), prompt: 'Reply with only: CONNECTION OK' }, 150000);
     }
     case 'saveSettings': return service.request('/api/settings', 'PUT', cleanSettings(input));
@@ -192,10 +211,21 @@ async function handle(method, input) {
         prefs.account_speeds = { ...prefs.account_speeds, [id]: speed }; savePrefs();
       }
       if (typeof input?.compact_view === 'boolean') { prefs.compact_view = input.compact_view; savePrefs(); }
+      if (typeof input?.restore_on_exit === 'boolean') { prefs.restore_on_exit = input.restore_on_exit; savePrefs(); }
+      if (typeof input?.prism_url === 'string') { prefs.prism_url = prismURL(input.prism_url); savePrefs(); }
       for (const key of ['channel', 'pelican_channel']) if (input && key in input) { prefs[key] = cleanChannel(input[key]); savePrefs(); }
       if (input && ['system', 'light', 'dark'].includes(input.theme)) { prefs.theme = input.theme; nativeTheme.themeSource = input.theme; savePrefs(); }
       return prefs;
     case 'logs': return service.request('/api/logs');
+    case 'exportQuality': {
+      const logs = await service.request('/api/logs');
+      const records = (logs.records || []).filter(record => record.quality);
+      if (!records.length) throw new Error('暂无可导出的质量记录');
+      const result = await dialog.showSaveDialog(window, { title: '导出协议观测', defaultPath: `codex-signals-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] });
+      if (result.canceled) return false;
+      await fsp.writeFile(result.filePath, JSON.stringify({ exported_at: new Date().toISOString(), records }, null, 2), { encoding: 'utf8', mode: 0o600 });
+      return true;
+    }
     case 'openLink': await shell.openExternal(externalLink(input)); return true;
     case 'openData': {
       const error = await shell.openPath(dataHome); if (error) throw new Error(error); return true;
@@ -222,7 +252,8 @@ if (lock) {
     if (!platformFolder) throw new Error('当前系统暂不支持桌面客户端');
     const executable = process.platform === 'win32' ? 'gptbridge.exe' : 'gptbridge';
     const binary = app.isPackaged ? path.join(process.resourcesPath, 'backend', executable) : path.join(__dirname, 'backend', `${platformFolder}-${process.arch}`, executable);
-    service = new BridgeService({ home: dataHome, binary });
+    work = new Work(dataHome); await work.listen();
+    service = new BridgeService({ home: dataHome, binary, work });
     pelican = new Pelican(dataHome, (body, signal) => service.request('/api/pelican/generate', 'POST', body, 910000, signal));
     await pelican.listen();
     const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));

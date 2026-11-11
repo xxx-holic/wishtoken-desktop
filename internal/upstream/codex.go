@@ -165,6 +165,13 @@ func (c *CodexClient) applyHeaders(req *http.Request, cred Credentials, downstre
 	if cred.AccountID != "" {
 		req.Header.Set("Chatgpt-Account-Id", cred.AccountID)
 	}
+	if downstream != nil {
+		// Preserve the server-issued sticky-routing state end to end. Dropping
+		// it makes chatgpt.com treat every bridged turn as a cold request.
+		if state := strings.TrimSpace(downstream.Get("X-Codex-Turn-State")); state != "" {
+			req.Header.Set("X-Codex-Turn-State", state)
+		}
+	}
 	beta := ""
 	if downstream != nil {
 		beta = strings.TrimSpace(downstream.Get(betaFeaturesHeader))

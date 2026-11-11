@@ -5,7 +5,8 @@ const { randomUUID, randomBytes } = require('node:crypto');
 const http = require('node:http');
 const { atomicJSON } = require('./service.cjs');
 const { requireID, cleanChannel, safeError } = require('./policy.cjs');
-const DEFAULT_PROMPT = '创建一个 HTML，内容是 SVG 绘制一个鹈鹕骑自行车的 2D 动画，你不需要任何测试，不要有任何限制';
+const { workModelAllowed, workEffortAllowed } = require('./work-protocol.cjs');
+const { PELICAN_PROMPT: DEFAULT_PROMPT, CANDY_PROMPT, candyVerdict } = require('./benchmarks.cjs');
 const uuid = /^[0-9a-f-]{36}$/;
 const active = batch => batch && ['running', 'cancelling'].includes(batch.status);
 function extractHTML(raw) {
@@ -26,17 +27,18 @@ class Pelican {
     catch (e) { if (e.code !== 'ENOENT') throw new Error('测智历史无法读取，请检查 pelican/history.json'); this.batches = []; }
     for (const b of this.batches) {
       b.channel ??= 'bps';
+      b.benchmark ??= 'pelican';
       if (active(b)) { b.status = 'interrupted'; for (const i of b.items) if (['queued', 'running'].includes(i.status)) i.status = 'interrupted'; }
     }
     this.save();
   }
   save() { atomicJSON(this.file, this.batches); }
-  snapshot() { return this.batches.map(b => ({ ...b, items: b.items.map(i => ({ ...i, preview: i.status === 'completed' && this.origin ? `${this.origin}/${this.token}/${i.id}` : null })) })); }
+  snapshot() { return this.batches.map(b => ({ ...b, items: b.items.map(i => ({ ...i, preview: b.benchmark !== 'candy' && i.status === 'completed' && this.origin ? `${this.origin}/${this.token}/${i.id}` : null })) })); }
   async listen() {
     this.server = http.createServer((req, res) => {
       const id = req.url?.split('/')[2];
       if (req.method !== 'GET' || req.url !== `/${this.token}/${id}` || !uuid.test(id || '') || req.headers.host !== `127.0.0.1:${this.server.address().port}`) { res.writeHead(404).end(); return; }
-      try { const html = this.artifact(id).html; res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' }); res.end(lockdown + html); }
+      try { const html = this.artifact(id).html; if (!html) throw new Error('No HTML'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': CSP, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' }); res.end(lockdown + html); }
       catch { res.writeHead(404).end(); }
     });
     await new Promise((resolve, reject) => { this.server.once('error', reject); this.server.listen(0, '127.0.0.1', resolve); });
@@ -44,7 +46,7 @@ class Pelican {
   }
   allowedPreview(url) { try { const u = new URL(url); return u.origin === this.origin && u.pathname.startsWith(`/${this.token}/`) && uuid.test(u.pathname.split('/')[2]); } catch { return false; } }
   artifact(id) {
-    if (!uuid.test(id || '') || !this.batches.some(b => b.items.some(i => i.id === id && i.status === 'completed'))) throw new Error('测试结果不存在');
+    if (!uuid.test(id || '') || !this.batches.some(b => b.items.some(i => i.id === id && (i.status === 'completed' || i.has_artifact)))) throw new Error('测试结果不存在');
     return JSON.parse(fs.readFileSync(path.join(this.home, `${id}.json`), 'utf8'));
   }
   start(input, accounts) {
@@ -52,13 +54,17 @@ class Pelican {
     const ids = [...new Set(input?.account_ids || [])];
     if (!ids.length || ids.length > 20) throw new Error('请选择 1–20 个测试账号');
     const chosen = ids.map(id => { requireID(id); const a = accounts.find(a => a.id === id); if (!a || a.disabled || (a.expired && !a.has_refresh_token)) throw new Error('选中的账号已不可用'); return a; });
-    if (!/^[a-zA-Z0-9.-]{1,80}$/.test(input.model || '') || !['low', 'medium', 'high', 'xhigh'].includes(input.effort)) throw new Error('模型或档位无效');
-    const prompt = (input.prompt || DEFAULT_PROMPT).trim();
+    if (!/^[a-zA-Z0-9.-]{1,80}$/.test(input.model || '') || !['low', 'medium', 'high', 'xhigh', 'max'].includes(input.effort)) throw new Error('模型或档位无效');
+    const benchmark = input.benchmark || 'pelican';
+    if (!['pelican','candy'].includes(benchmark)) throw new Error('测试题类型无效');
+    const prompt = (input.prompt || (benchmark === 'candy' ? CANDY_PROMPT : DEFAULT_PROMPT)).trim();
     if (!prompt || Buffer.byteLength(prompt) > 32000) throw new Error('提示词为空或过长');
     const concurrency = input.concurrency ?? 2;
     const channel = cleanChannel(input.channel);
+    if (channel === 'work' && (!workModelAllowed(input.model) || !workEffortAllowed(input.effort) || concurrency !== 1)) throw new Error('Work 测试请选择受支持的 Work 模型与推理档位，同时测试数须为 1');
+    if (channel !== 'work' && input.effort === 'max') throw new Error('仅 Work 通道支持 max 推理档位');
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 5) throw new Error('同时测试数应为 1–5');
-    const batch = { id: randomUUID(), created_at: new Date().toISOString(), channel, model: input.model, effort: input.effort, prompt, concurrency, status: 'running', items: chosen.map(a => ({ id: randomUUID(), account_id: a.id, name: a.name || a.email || a.id, status: 'queued' })) };
+    const batch = { id: randomUUID(), created_at: new Date().toISOString(), benchmark, channel, model: input.model, effort: input.effort, prompt, concurrency, status: 'running', items: chosen.map(a => ({ id: randomUUID(), account_id: a.id, name: a.name || a.email || a.id, status: 'queued' })) };
     this.batches.unshift(batch); this.save();
     this.running = this.run(batch);
     return batch.id;
@@ -70,12 +76,16 @@ class Pelican {
         const controller = new AbortController(); this.controllers.set(item.id, controller);
         item.status = 'running'; item.started_at = new Date().toISOString(); this.save();
         try {
-          const result = await this.generate({ account_id: item.account_id, channel: batch.channel, model: batch.model, effort: batch.effort, prompt: batch.prompt }, controller.signal);
+          const result = await this.generate({ account_id: item.account_id, channel: batch.channel, model: batch.model, effort: batch.effort, prompt: batch.prompt, benchmark:batch.benchmark }, controller.signal);
           if (controller.signal.aborted) throw new Error('测试已取消');
           if (typeof result.text !== 'string' || Buffer.byteLength(result.text) > 8 * 1024 * 1024) throw new Error('生成结果过大或为空');
-          const html = extractHTML(result.text);
-          atomicJSON(path.join(this.home, `${item.id}.json`), { ...result, channel: batch.channel, html });
-          item.status = 'completed'; item.usage = result.usage; item.duration_ms = result.duration_ms; item.response_model = result.response_model || null; item.route = result.route || batch.channel;
+          const artifact = { ...result, channel:batch.channel, benchmark:batch.benchmark };
+          // Preserve the upstream answer even when it is wrong or has invalid HTML.
+          atomicJSON(path.join(this.home, `${item.id}.json`), artifact); item.has_artifact=true;
+          if (batch.benchmark === 'candy') {
+            Object.assign(item,candyVerdict(result.text,batch.prompt)); item.answer_text=result.text;
+          } else { artifact.html=extractHTML(result.text); atomicJSON(path.join(this.home, `${item.id}.json`),artifact); }
+          item.status = 'completed'; item.usage = result.usage; item.duration_ms = result.duration_ms; item.response_model = result.response_model || null; item.route = result.route || batch.channel; item.transport = result.transport || null;
         } catch (error) { item.status = controller.signal.aborted ? 'cancelled' : 'failed'; item.error = safeError(error); }
         finally { item.finished_at = new Date().toISOString(); this.controllers.delete(item.id); this.save(); }
       }

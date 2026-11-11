@@ -12,10 +12,11 @@ function atomicJSON(file, data) {
   fs.renameSync(file + '.tmp', file);
 }
 class BridgeService {
-  constructor({ home, binary, env = process.env }) {
+  constructor({ home, binary, env = process.env, work }) {
     this.home = path.resolve(home);
     this.binary = binary;
     this.env = env;
+    this.work = work;
     this.child = null;
     this.starting = null;
     this.stopping = false;
@@ -49,7 +50,7 @@ class BridgeService {
   async sameService() {
     try {
       const status = await this.request('/api/status', 'GET', undefined, 1200);
-      return status.desktop_mode === true && path.resolve(status.home) === this.home;
+      return status.desktop_mode === true && path.resolve(status.home) === this.home && (!this.work || status.work_bridge_id === crypto.createHash('sha256').update(this.work.key).digest('hex'));
     } catch { return false; }
   }
   async start() {
@@ -82,6 +83,7 @@ class BridgeService {
     const log = fs.openSync(this.logPath, 'a', 0o600);
     const env = Object.fromEntries(Object.entries(this.env).filter(([key]) => !/^GPTBRIDGE_/i.test(key) && !['CODEX_HOME', 'CODEX_AUTHAPI_BASE_URL'].includes(key)));
     env.GPTBRIDGE_HOME = this.home;
+    if (this.work) { env.GPTBRIDGE_WORK_URL = this.work.url; env.GPTBRIDGE_WORK_KEY = this.work.key; }
     if (this.env.GPTBRIDGE_CODEX_BIN) env.GPTBRIDGE_CODEX_BIN = this.env.GPTBRIDGE_CODEX_BIN;
     let failure;
     try {

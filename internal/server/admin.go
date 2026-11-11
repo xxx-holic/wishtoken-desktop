@@ -35,6 +35,52 @@ type recordLog struct {
 
 func newRecordLog(max int) *recordLog { return &recordLog{max: max} }
 
+func qualitySummary(records []router.Record) object {
+	summary := object{"checked": 0, "model_mismatches": 0, "last_model_mismatch": "", "accounts": object{}}
+	accounts := summary["accounts"].(object)
+	for _, rec := range records {
+		if rec.Quality != "model_match" && rec.Quality != "model_mismatch" {
+			continue
+		}
+		label := rec.Account
+		if label == "" {
+			label = "unknown"
+		}
+		summary["checked"] = summary["checked"].(int) + 1
+		entry, _ := accounts[label].(object)
+		if entry == nil {
+			entry = object{"checked": 0, "model_mismatches": 0, "last_quality": ""}
+			accounts[label] = entry
+		}
+		entry["checked"] = entry["checked"].(int) + 1
+		// Records arrive newest first; keep the newest signal per account.
+		if entry["last_quality"] == "" {
+			entry["last_quality"] = rec.Quality
+			if rec.TurnStateLength > 0 {
+				entry["last_turn_state_length"] = rec.TurnStateLength
+			}
+			if rec.SafetyBuffering != "" {
+				entry["safety_buffering"] = rec.SafetyBuffering
+			}
+			if rec.SafetyFasterModel != "" {
+				entry["safety_faster_model"] = rec.SafetyFasterModel
+			}
+		}
+		if rec.ModelMismatch {
+			stamp := rec.Time.UTC().Format(time.RFC3339)
+			summary["model_mismatches"] = summary["model_mismatches"].(int) + 1
+			entry["model_mismatches"] = entry["model_mismatches"].(int) + 1
+			if entry["last_model_mismatch"] == nil {
+				entry["last_model_mismatch"] = stamp
+			}
+			if summary["last_model_mismatch"] == "" {
+				summary["last_model_mismatch"] = stamp
+			}
+		}
+	}
+	return summary
+}
+
 func (l *recordLog) add(rec router.Record) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -124,7 +170,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, object{"ok": true, "backup": backup})
 	case path == "/models" && r.Method == http.MethodGet:
 		cfg := s.Config()
-		api.WriteJSON(w, http.StatusOK, object{"catalog": basispoints.Catalog, "native_catalog": localcodex.NativeModels(), "bps_models": cfg.BPSModels, "efforts": basispoints.Efforts})
+		api.WriteJSON(w, http.StatusOK, object{"catalog": basispoints.Catalog, "native_catalog": localcodex.NativeModels(), "work_catalog": localcodex.WorkModels(), "prism_catalog": localcodex.PrismModels(), "bps_models": cfg.BPSModels, "efforts": basispoints.Efforts, "work_efforts": localcodex.WorkEfforts, "prism_efforts": localcodex.PrismEfforts})
 	default:
 		writeError(w, r, http.StatusNotFound, "not_found", "invalid_request_error", "unknown management endpoint")
 	}
@@ -152,10 +198,12 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, object{
 		"version": version.Version, "listen": cfg.Listen, "base_url": s.baseURL(),
 		"desktop_mode":   cfg.DesktopMode,
+		"work_bridge_id": workBridgeID(),
 		"uptime_seconds": int(time.Since(s.startedAt).Seconds()), "accounts": counts,
 		"route_policy": cfg.RoutePolicy, "bps_models": cfg.BPSModels, "native_fallback": cfg.NativeFallback,
 		"proxy_url": httpx.Redact(cfg.ProxyURL), "api_key_set": cfg.APIKey != "", "home": config.Home(),
 		"codex_config": codexcfg.Inspect(codexcfg.ConfigPath()), "default_model": cfg.DefaultModel,
+		"quality": qualitySummary(s.logs.list(200)),
 	})
 }
 
@@ -486,6 +534,7 @@ func (s *Server) settingsView() object {
 	return object{
 		"listen": cfg.Listen, "allow_remote": cfg.AllowRemote, "api_key_set": cfg.APIKey != "",
 		"proxy_url": cfg.ProxyURL, "route_policy": cfg.RoutePolicy, "bps_models": cfg.BPSModels,
+		"bps_transport":   cfg.BPSTransport,
 		"native_fallback": cfg.NativeFallback, "default_model": cfg.DefaultModel, "default_effort": cfg.DefaultEffort,
 		"active_account_id":   cfg.ActiveAccountID,
 		"anthropic_model_map": cfg.AnthropicModelMap, "scheduler": cfg.Scheduler, "auto_refresh": cfg.AutoRefresh,
@@ -666,6 +715,9 @@ func (s *Server) adminTest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	start := time.Now()
 	headers := http.Header{}
+	if req.Route == "work" {
+		headers.Set("X-GPTBridge-Channel", "work")
+	}
 	if req.AccountID != "" {
 		headers.Set("X-GPTBridge-Account", req.AccountID)
 	}

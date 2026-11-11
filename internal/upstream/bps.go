@@ -17,6 +17,8 @@ import (
 
 // BPSClient talks to the Basispoints gateway.
 type BPSClient struct {
+	// Transport is explicitly selected. Empty retains the HTTP/SSE route.
+	Transport string
 	// ResponsesURL / AttachmentsURL override the defaults (tests).
 	ResponsesURL   string
 	AttachmentsURL string
@@ -59,6 +61,12 @@ func ApplyBPSHeaders(req *http.Request, cred Credentials) {
 func (c *BPSClient) Responses(ctx context.Context, cred Credentials, body []byte) (*http.Response, error) {
 	if strings.TrimSpace(cred.AccessToken) == "" || strings.TrimSpace(cred.AccountID) == "" {
 		return nil, fmt.Errorf("basispoints requires a ChatGPT access token and account id")
+	}
+	if c.Transport == "websocket" {
+		return c.responsesWebSocket(ctx, cred, body)
+	}
+	if c.Transport != "" && c.Transport != "http" {
+		return nil, fmt.Errorf("unknown BPS transport")
 	}
 	hc, err := client(cred, 10*time.Minute)
 	if err != nil {

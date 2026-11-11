@@ -108,6 +108,8 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		Channel       string `json:"channel"`
 		Speed         string `json:"speed"`
 		AppMode       string `json:"app_mode"`
+		PrismURL      string `json:"prism_url"`
+		PrismKey      string `json:"prism_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, r, 400, "invalid_json", "invalid_request_error", "invalid launch request")
@@ -139,11 +141,17 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 	}
 	o.Channel = channel
 	o.Speed = req.Speed
+	if channel == "prism" {
+		o.PrismURL = req.PrismURL
+		o.PrismKey = req.PrismKey
+		o.AccessToken = ""
+		o.AuthAPIURL = ""
+	}
 	if channel == "codex" && !s.Config().DesktopMode {
 		writeError(w, r, 400, "route_policy", "invalid_request_error", "原生启动需要专用桌面客户端")
 		return
 	}
-	if (channel == "bps" && !s.Config().BPSModelAllowed(o.Model)) || (channel == "codex" && !localcodex.NativeModelAllowed(o.Model)) {
+	if (channel == "bps" && !s.Config().BPSModelAllowed(o.Model)) || (channel == "codex" && !localcodex.NativeModelAllowed(o.Model)) || (channel == "work" && !localcodex.WorkModelAllowed(o.Model)) || (channel == "prism" && !localcodex.PrismModelAllowed(o.Model)) {
 		writeError(w, r, 400, "model_unavailable", "invalid_request_error", "模型不在所选通道列表中")
 		return
 	}
@@ -167,6 +175,10 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.AppMode != "main" && req.AppMode != "isolated" {
 			writeError(w, r, 400, "invalid_app_mode", "invalid_request_error", "App 工作空间无效")
+			return
+		}
+		if channel == "prism" && req.AppMode == "main" {
+			writeError(w, r, 400, "prism_app_mode", "invalid_request_error", "Prism 请使用独立实例，不能接管主 Codex 配置")
 			return
 		}
 	}
@@ -202,7 +214,7 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 	key := sha256.Sum256([]byte(identity))
 	instanceID := hex.EncodeToString(key[:10])
 	o.Home = filepath.Join(config.Home(), "codex-instances", instanceID)
-	if s.Config().DesktopMode && s.Config().CockpitKey != "" && jwt.IsJWT(a.AccessToken) {
+	if channel != "prism" && s.Config().DesktopMode && s.Config().CockpitKey != "" && jwt.IsJWT(a.AccessToken) {
 		o.AccessToken = a.AccessToken
 		o.AuthAPIURL = s.baseURL() + "/cockpit-auth/" + s.Config().CockpitKey
 	}

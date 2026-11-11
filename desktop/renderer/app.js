@@ -100,14 +100,15 @@ function renderAccounts() {
     const warning = state.usageErrors.get(account.id);
     const current = account.id === data.codex.active_account_id;
     const secondaryLabel = account.usage?.primary?.window_seconds === 604800 ? '其他额度窗口' : '7 天额度';
+    const quality = state.data?.status?.quality?.accounts?.[label(account)];
     return `<article class="account-card${selected ? ' selected' : ''}" data-id="${esc(account.id)}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="选择 ${esc(label(account))}">
       <div class="card-top"><div class="avatar">${esc(label(account).slice(0, 1).toUpperCase())}</div><div class="card-identity"><div class="card-name" title="${esc(label(account))}">${esc(label(account))}</div><div class="card-email" title="${esc(account.account_id)}">${esc(account.name ? account.email : `Team ${account.account_id}`)}</div></div>${selected ? `<span class="card-selected">${icon('check')}</span>` : ''}</div>
-      <div class="card-tags"><span class="tag team">${esc(planLabel(account))}</span>${current ? '<span class="tag active">当前启动账号</span>' : ''}<span class="tag">${account.has_refresh_token ? '支持自动续期' : '到期后重新导入'}</span>${account.usage?.limit_reached ? '<span class="tag">额度已用尽</span>' : ''}</div>
+      <div class="card-tags"><span class="tag team">${esc(planLabel(account))}</span>${current ? '<span class="tag active">当前启动账号</span>' : ''}<span class="tag">${account.has_refresh_token ? '支持自动续期' : '到期后重新导入'}</span>${account.usage?.limit_reached ? '<span class="tag">额度已用尽</span>' : ''}${quality?.model_mismatches ? `<span class="tag quality-bad" title="最近 ${quality.model_mismatches} 次响应报告的模型名不同，请查看运行记录">模型标识差异</span>` : ''}</div>
       <div class="card-health">${statusHTML(account)}<span>${esc(ago(account.usage?.updated_at))}</span></div>
       <div class="quotas">${quotaHTML(account.usage?.primary, '5 小时额度')}${!account.usage || account.usage.secondary ? quotaHTML(account.usage?.secondary, secondaryLabel) : ''}</div>
       ${warning ? `<div class="card-warning">额度查询失败：${esc(warning)}${account.usage ? '；仍显示上次快照' : ''}</div>` : ''}
       ${account.last_error && account.status !== 'cooldown' && !account.last_error.startsWith('rate limited (') ? `<div class="card-warning">${esc(account.last_error)}</div>` : ''}
-      <div class="card-speed"><span>${icon('bolt')}响应速度</span><select data-speed-id="${esc(account.id)}" aria-label="${esc(label(account))} 响应速度" ${$('channel').value === 'bps' ? 'disabled title="BPS 暂仅支持标准速度"' : ''}><option value="standard" ${accountSpeed(account.id) === 'standard' ? 'selected' : ''}>标准</option><option value="fast" ${accountSpeed(account.id) === 'fast' ? 'selected' : ''}>快速</option></select></div>
+      <div class="card-speed"><span>${icon('bolt')}响应速度</span><select data-speed-id="${esc(account.id)}" aria-label="${esc(label(account))} 响应速度" ${$('channel').value !== 'codex' ? 'disabled title="此通道暂仅支持标准速度"' : ''}><option value="standard" ${accountSpeed(account.id) === 'standard' ? 'selected' : ''}>标准</option><option value="fast" ${accountSpeed(account.id) === 'fast' ? 'selected' : ''}>快速</option></select></div>
       <div class="card-bottom"><button class="card-launch" data-action="launch" data-id="${esc(account.id)}" ${account.disabled ? 'disabled' : ''}>${icon('arrow')}切换并启动</button><button data-action="pelican" data-id="${esc(account.id)}" title="鹈鹕测智">${icon('bolt')}测智</button><button data-action="usage" data-id="${esc(account.id)}" title="刷新额度">${icon('refresh')}</button><button data-action="edit" data-id="${esc(account.id)}" aria-label="管理 ${esc(label(account))}" title="管理账号">${icon('more')}</button></div>
     </article>`;
   }).join('');
@@ -132,18 +133,18 @@ function renderHistory() {
     return `<article class="history-row"><span class="icon-box">${icon('folder')}</span><div class="history-info"><strong>${esc(basename)}</strong><p title="${esc(record.directory)}">${record.target === 'app' ? record.app_mode === 'main' ? '主应用 · 原有项目与会话' : '独立实例 · 单独工作空间' : esc(record.directory)}</p><div class="history-meta"><span>${esc(account ? label(account) : '账号已移除')}</span><span>${channelLabel(record.channel)} · ${esc(record.model)} · ${esc(record.effort)}</span><span>${date(record.last_used)}</span></div></div><div class="history-actions"><button class="secondary" data-history="${esc(record.id)}" data-resume="false" ${disabled}>${record.target === 'app' ? '打开 App' : '新会话'}</button>${record.target === 'app' ? '' : `<button class="primary" data-history="${esc(record.id)}" data-resume="true" ${disabled}>继续会话${icon('arrow')}</button>`}</div></article>`;
   }).join('') : empty('还没有最近项目', '选择账号和项目目录，首次启动后会保存在这里。');
 }
-const channelLabel = channel => channel === 'codex' ? '原生 Codex' : 'BPS';
+const channelLabel = channel => ({codex:'原生 Codex',work:'ChatGPT Work',bps:'BPS'}[channel] || 'BPS');
 const speedLabel = speed => speed === 'fast' ? '快速' : '标准';
-function accountSpeed(id) { return $('channel').value === 'bps' ? 'standard' : state.data?.preferences.account_speeds?.[id] || 'standard'; }
+function accountSpeed(id) { return $('channel').value !== 'codex' ? 'standard' : state.data?.preferences.account_speeds?.[id] || 'standard'; }
 function renderSpeed() {
   $('speed').value = accountSpeed(state.selected);
-  $('speed').disabled = $('channel').value === 'bps' || !state.selected;
-  $('speed-hint').textContent = $('channel').value === 'bps' ? 'BPS 暂仅支持标准速度。切换到原生通道可选择快速。' : '按账号保存；快速模式会发送 priority。能否使用由账号和模型权限决定。';
+  $('speed').disabled = $('channel').value !== 'codex' || !state.selected;
+  $('speed-hint').textContent = $('channel').value !== 'codex' ? '此通道当前仅支持标准速度。' : '按账号保存；快速模式会发送 priority。能否使用由账号和模型权限决定。';
 }
 async function saveSpeed(id, speed) { state.data.preferences = await api.preferences({account_speed:{id,speed}}); renderAccounts(); }
 function channelModels(channel, select, preferred) {
   const data = state.data;
-  const models = channel === 'codex' ? data.models.native_catalog : data.models.catalog.filter(model => data.models.bps_models.includes(model.id));
+  const models = channel === 'work' ? data.models.work_catalog : channel === 'prism' ? data.models.prism_catalog : channel === 'codex' ? data.models.native_catalog : data.models.catalog.filter(model => data.models.bps_models.includes(model.id));
   select.innerHTML = (models || []).map(model => `<option value="${esc(model.id)}">${esc(model.display_name)}</option>`).join('');
   select.value = preferred || '';
   if (!select.value) select.selectedIndex = 0;
@@ -152,6 +153,19 @@ function launchChannel(channel, preferred) {
   $('channel').value = channel || 'bps';
   channelModels($('channel').value, $('model'), preferred);
   $('route-label').textContent = `${channelLabel(channel)} 通道`;
+  const work=channel==='work', prism=channel==='prism';
+  $('work-setup').hidden=!work; $('work-hint').hidden=!work; $('prism-setup').hidden=!prism;
+  document.querySelectorAll('[data-effort]').forEach(b=>{ const effort=b.dataset.effort; b.disabled=(effort==='max'&&!work&&!prism)||(effort==='ultra'&&!prism); });
+  if(prism){
+    if(!['low','medium','high','xhigh','max','ultra'].includes(state.effort)) setEffort('high');
+    $('app-mode').value='isolated'; $('app-mode').disabled=true;
+    $('context-window').value=272000; $('compact-limit').value=200000; updateContextLabel();
+  }else{
+    $('app-mode').disabled=false;
+    if(state.effort==='max'||state.effort==='ultra') setEffort(work?'max':'xhigh');
+    if(work&&!['low','medium','high','xhigh','max'].includes(state.effort)) setEffort('medium');
+    if(work){ $('context-window').value=32000; $('compact-limit').value=24000; updateContextLabel(); }
+  }
   renderSpeed();
 }
 function applyInitial(data) {
@@ -160,13 +174,17 @@ function applyInitial(data) {
   $('launch-target').value = preferences.target || (data.codex.app?.installed ? 'app' : 'cli');
   $('app-mode').value = preferences.app_mode || 'main';
   $('compact-view').checked = preferences.compact_view === true;
+  $('restore-on-exit').checked = preferences.restore_on_exit !== false;
   launchChannel(preferences.channel || 'bps', preferences.model || data.codex.model);
-  setEffort(preferences.effort || data.codex.effort || 'xhigh');
+  $('prism-url').value = preferences.prism_url || 'http://127.0.0.1:18765';
+  const effortLevels = preferences.channel === 'prism' ? ['low','medium','high','xhigh','max','ultra'] : preferences.channel === 'work' ? ['low','medium','high','xhigh','max'] : ['low','medium','high','xhigh'];
+  setEffort(effortLevels.includes(preferences.effort) ? preferences.effort : (preferences.channel === 'work' ? 'medium' : preferences.channel === 'prism' ? 'high' : data.codex.effort || 'xhigh'));
   $('directory').value = preferences.directory || '';
-  $('context-window').value = preferences.context_window || 272000;
-  $('compact-limit').value = preferences.compact_limit || 200000;
+  $('context-window').value = preferences.channel === 'work' ? 32000 : preferences.context_window || 272000;
+  $('compact-limit').value = preferences.channel === 'work' ? 24000 : preferences.compact_limit || 200000;
   $('proxy').value = data.settings.proxy_url || '';
   $('auto-refresh').checked = data.settings.auto_refresh;
+  $('bps-transport').value = data.settings.bps_transport || 'http';
   $('usage-probe').checked = data.settings.usage_probe;
   $('theme').value = preferences.theme || 'system'; applyTheme($('theme').value);
   $('data-home').textContent = data.status.home;
@@ -201,11 +219,12 @@ function switchPage(page) {
   state.page = page;
   document.querySelectorAll('.page').forEach(element => element.hidden = element.id !== `page-${page}`);
   document.querySelectorAll('[data-page]').forEach(button => { const current = button.dataset.page === page; button.classList.toggle('active', current); if (current) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
-  $('page-title').textContent = { accounts: 'Team 账号', history: '最近项目', logs: '运行记录', settings: '设置', pelican: '鹈鹕测智' }[page];
+  $('page-title').textContent = { accounts: 'Team 账号', history: '最近项目', logs: '运行记录', settings: '设置', pelican: '测智对比' }[page];
   $('refresh-all').hidden = page !== 'accounts'; $('import-files').hidden = page !== 'accounts';
   if (page === 'history') renderHistory();
   if (page === 'logs') void loadLogs();
   if (page === 'pelican') void loadPelican();
+  if (page === 'settings') void action('work-load',loadWork);
 }
 async function refreshUsage(id, silent = false) {
   return action(`usage-${id}`, async () => {
@@ -230,12 +249,49 @@ async function importResult(result) {
   } else toast(message);
   if (result.ids?.length) { toast('正在查询新账号额度…', 'info', 2500); void refreshMany(result.ids); }
 }
-async function importFiles() { await action('import', async () => importResult(await api.importFiles())); }
+async function importFiles() { await action('import', async () => { const result = await api.importFiles(); if (!result) return; closeModal(); await importResult(result); }); }
 function pasteDialog() {
-  modal('<h2>粘贴账号 JSON</h2><p>支持单个 Team 子号、账号数组和常见导出格式。</p><textarea id="json-text" spellcheck="false" placeholder="在此粘贴 JSON…" aria-label="账号 JSON"></textarea><div class="modal-actions"><button class="secondary" id="cancel-paste">取消</button><button class="primary" id="submit-paste">导入账号</button></div>');
+  if (state.busy.has('import')) return;
+  modal(`<div class="import-dialog"><h2>导入 Codex 账号</h2><p>直接粘贴账号 JSON、auth.json 或账号数组，也可以选择本地 JSON 文件。</p>
+    <div class="import-tabs" role="tablist" aria-label="导入方式"><button id="import-paste-tab" role="tab" aria-selected="true" aria-controls="import-paste-panel">粘贴 JSON</button><button id="import-file-tab" role="tab" aria-selected="false" aria-controls="import-file-panel" tabindex="-1">从文件导入</button></div>
+    <section id="import-paste-panel" role="tabpanel" aria-labelledby="import-paste-tab">
+      <details class="import-example"><summary>支持的格式与示例</summary><p>支持单个对象、账号数组、auth.json 和 Sub2API 导出。access_token 或 refresh_token 至少提供一项；也可包含 id_token、account_id、email、expired 和 last_refresh。</p><pre>[
+  {
+    "access_token": "在此填写访问令牌",
+    "refresh_token": "在此填写刷新令牌",
+    "account_id": "账号所属工作区 ID",
+    "email": "账号邮箱",
+    "type": "codex"
+  }
+]</pre></details>
+      <label class="field-label" for="json-text">账号 JSON</label><textarea id="json-text" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="在此粘贴 JSON；支持 [{ ... }, { ... }] 批量导入" aria-describedby="import-input-error"></textarea>
+      <p id="import-input-error" class="import-input-error" role="alert" hidden></p>
+      <div class="modal-actions"><button class="secondary" id="cancel-paste">取消</button><button class="primary" id="submit-paste" disabled>导入账号</button></div>
+    </section>
+    <section id="import-file-panel" class="import-file-panel" role="tabpanel" aria-labelledby="import-file-tab" hidden>${icon('upload')}<h3>从本地文件导入</h3><p>支持一次选择多个 .json 文件，也可直接拖入主窗口。</p><button class="primary" id="choose-import-files">选择 JSON 文件</button></section></div>`);
+  const input = $('json-text'), submit = $('submit-paste'), error = $('import-input-error');
+  const tabs = [$('import-paste-tab'), $('import-file-tab')];
+  const selectTab = index => {
+    tabs.forEach((tab, i) => { tab.setAttribute('aria-selected', String(i === index)); tab.tabIndex = i === index ? 0 : -1; });
+    $('import-paste-panel').hidden = index !== 0; $('import-file-panel').hidden = index !== 1;
+  };
+  tabs.forEach((tab, i) => {
+    tab.onclick = () => selectTab(i);
+    tab.onkeydown = event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - i; selectTab(next); tabs[next].focus(); } };
+  });
   $('cancel-paste').onclick = closeModal;
-  $('submit-paste').onclick = () => action('import', async () => { const input = $('json-text').value.trim(); if (!input) throw new Error('请先粘贴 JSON'); $('submit-paste').disabled = true; try { const result = await api.importText(input); closeModal(); await importResult(result); } finally { if ($('submit-paste')) $('submit-paste').disabled = false; } });
-  $('json-text').focus();
+  $('choose-import-files').onclick = importFiles;
+  input.oninput = () => { submit.disabled = !input.value.trim() || state.busy.has('import'); error.hidden = true; input.removeAttribute('aria-invalid'); };
+  submit.onclick = () => action('import', async () => {
+    const text = input.value.trim(); if (!text) return;
+    submit.disabled = true; input.disabled = true; submit.textContent = '正在导入…';
+    try {
+      const result = await api.importText(text);
+      input.value = ''; closeModal(); await importResult(result);
+    } catch (e) { error.textContent = e.message; error.hidden = false; input.disabled = false; input.setAttribute('aria-invalid', 'true'); input.focus(); }
+    finally { input.disabled = false; submit.disabled = !input.value.trim(); submit.textContent = '导入账号'; }
+  });
+  input.focus();
 }
 function editDialog(id) {
   const account = accountByID(id); if (!account) return;
@@ -249,7 +305,11 @@ function editDialog(id) {
     $('confirm-remove').onclick = () => action('edit', async () => { await api.account({ id, action: 'delete' }); closeModal(); state.usageErrors.delete(id); await refresh(true); toast('账号已移除'); });
   };
 }
-function launchOptions() { return { account_id: state.selected, app_mode: $('app-mode').value, channel: $('channel').value, speed: $('speed').value, directory: $('directory').value.trim(), target: $('launch-target').value, model: $('model').value, effort: state.effort, context_window: Number($('context-window').value), compact_limit: Number($('compact-limit').value) }; }
+function launchOptions() {
+  const options = { account_id: state.selected, app_mode: $('app-mode').value, channel: $('channel').value, speed: $('speed').value, directory: $('directory').value.trim(), target: $('launch-target').value, model: $('model').value, effort: state.effort, context_window: Number($('context-window').value), compact_limit: Number($('compact-limit').value) };
+  if ($('channel').value === 'prism') { options.prism_url = $('prism-url').value.trim(); options.prism_key = $('prism-key').value; }
+  return options;
+}
 async function launch(resume = false, record) {
   await action('launch', async () => {
     const options = record ? { account_id: record.account_id, app_mode: record.app_mode || 'isolated', channel: record.channel || 'bps', speed:record.speed || 'standard', directory: record.directory, target: record.target || 'cli', model: record.model, effort: record.effort, context_window: record.context_window, compact_limit: record.compact_limit, resume } : { ...launchOptions(), resume };
@@ -267,6 +327,7 @@ async function launch(resume = false, record) {
   });
 }
 async function testAccount(id) {
+  if ($('channel').value === 'prism') { toast('Prism 请在启动后直接测试；连接测试暂不经过 Prism 桥', 'error', 5000); return; }
   await action(`test-${id}`, async () => {
     toast('正在测试模型连接，可能需要一两分钟…', 'info', 4500);
     const result = await api.test({ account_id: id, channel: $('channel').value, model: $('model').value, effort: state.effort });
@@ -278,17 +339,29 @@ async function testAccount(id) {
 async function loadLogs() {
   try {
     const data = await api.logs();
-    $('logs-list').innerHTML = data.records?.length ? `<table class="log-table"><thead><tr><th>时间</th><th>模型 / 推理</th><th>通道 / 速度</th><th>结果</th><th>耗时</th></tr></thead><tbody>${data.records.map(record => `<tr><td>${date(record.time)}</td><td><strong>${esc(record.model)}</strong><br><small>返回 ${esc(record.response_model || '未报告')}</small><br><span class="muted">${esc(record.effort)}</span></td><td><code>${esc(record.route)}</code><br><small>请求 ${esc(record.service_tier || 'standard')} → 返回 ${esc(record.response_service_tier || '未报告')}</small></td><td class="${record.status >= 400 || record.stream_status === 'failed' ? 'danger-text' : ''}" title="${esc(record.error)}">${record.status} ${esc(record.stream_status || '连接已建立')}${record.error ? `<br><small>${esc(record.error.slice(0, 180))}</small>` : ''}</td><td>${(record.duration_ms / 1000).toFixed(1)} s</td></tr>`).join('')}</tbody></table>` : empty('暂无请求记录', '启动 Codex 或测试连接后，实际请求会显示在这里。');
+    const records = data.records || [];
+    const checked = records.filter(record => ['model_match','model_mismatch'].includes(record.quality)).length;
+    const mismatches = records.filter(record => record.model_mismatch).length;
+    const summary = checked ? `<div class="quality-summary"><strong>协议信号</strong><span>${checked} 次有模型标识的响应中，${mismatches} 次标识不匹配</span><span class="muted">模型名、状态长度和 buffering 仅作观测；能力需结合原始题目与回答判断。缓存 tokens 包含在输入量内，不代表实际账单。</span></div>` : '';
+    $('logs-list').innerHTML = records.length ? summary + `<table class="log-table"><thead><tr><th>时间</th><th>模型 / 推理</th><th>通道 / 速度</th><th>观测</th><th>结果 / 用量</th><th>耗时</th></tr></thead><tbody>${records.map(record => {
+      const details = [record.request_turn_state_length ? `req-state ${record.request_turn_state_length}` : 'req-state 未回传', record.turn_state_length ? `resp-state ${record.turn_state_length}` : '', record.safety_buffering ? `safety ${record.safety_buffering}` : '', record.safety_faster_model ? `→ ${record.safety_faster_model}` : ''].filter(Boolean).join(' · ');
+      const quality = (record.model_mismatch ? '<span class="tag quality-bad">模型名不匹配</span>' : record.quality === 'model_match' ? '<span class="tag quality-ok">模型名一致</span>' : '<span class="muted">未知</span>') + (details ? `<br><small>${esc(details)}</small>` : '');
+      const usage = record.stream_status === 'completed' ? `<br><small>输入 ${record.input_tokens ?? '—'} · 缓存 ${record.cached_input_tokens ?? 0}<br>输出 ${record.output_tokens ?? '—'} · 推理 ${record.reasoning_tokens ?? 0}</small>` : '';
+      return `<tr><td>${date(record.time)}</td><td><strong>${esc(record.model)}</strong><br><small>返回 ${esc(record.response_model || '未报告')}</small><br><span class="muted">${esc(record.effort)}</span></td><td><code>${esc(record.route)} ${esc(record.transport || '')}</code><br><small>请求 ${esc(record.service_tier || 'standard')} → 返回 ${esc(record.response_service_tier || '未报告')}</small></td><td>${quality}</td><td class="${record.status >= 400 || record.stream_status === 'failed' ? 'danger-text' : ''}" title="${esc(record.error)}">${record.status} ${esc(record.stream_status || '连接已建立')}${record.error ? `<br><small>${esc(record.error.slice(0, 180))}</small>` : ''}${usage}</td><td>${(record.duration_ms / 1000).toFixed(1)} s</td></tr>`;
+    }).join('')}</tbody></table>` : empty('暂无请求记录', '启动 Codex 或测试连接后，实际请求会显示在这里。');
   } catch (error) { toast(error.message, 'error'); }
 }
 function updateContextLabel() { document.querySelector('.advanced summary span').textContent = `${Math.round(Number($('context-window').value) / 1000)}k / ${Math.round(Number($('compact-limit').value) / 1000)}k`; }
 
 document.querySelector('nav').addEventListener('click', event => { const button = event.target.closest('[data-page]'); if (button) switchPage(button.dataset.page); });
-$('import-files').onclick = importFiles;
+$('import-files').onclick = pasteDialog;
 $('paste-json').onclick = pasteDialog;
+$('modal').addEventListener('close', () => { const input = $('json-text'); if (input) input.value = ''; });
 $('refresh-all').onclick = () => action('refresh-all', async () => { const ids = state.data?.accounts.filter(account => !account.disabled).map(account => account.id) || []; await refreshMany(ids); const failed = ids.filter(id => state.usageErrors.has(id)).length; toast(failed ? `${failed} 个账号查询失败，详情见账号卡片` : '全部额度已更新', failed ? 'error' : 'success'); });
 $('search').oninput = renderAccounts; $('filter').onchange = renderAccounts;
 $('account-sort').onchange = renderAccounts; $('compact-view').onchange = () => { renderAccounts(); void api.preferences({compact_view:$('compact-view').checked}); };
+$('restore-on-exit').onchange = () => { void api.preferences({restore_on_exit:$('restore-on-exit').checked}); toast($('restore-on-exit').checked ? '退出时将自动还原 Codex 配置' : '退出时保留当前 Codex 配置'); };
+$('prism-url').onchange = () => { if ($('prism-url').value.trim()) void api.preferences({prism_url:$('prism-url').value.trim()}).catch(error => toast(error.message, 'error')); };
 $('speed').onchange = () => action('speed', () => saveSpeed(state.selected, $('speed').value));
 $('account-list').onchange = event => { if (event.target.dataset.speedId) void action('speed', () => saveSpeed(event.target.dataset.speedId, event.target.value)); };
 $('quick-account').onchange = () => { state.selected = $('quick-account').value; renderAccounts(); };
@@ -296,13 +369,13 @@ async function selectAccount(id) { await action('select', async () => { await ap
 $('select-account').onclick = () => selectAccount(state.selected);
 $('launch-target').onchange = updateButtons;
 $('app-mode').onchange = updateButtons;
-$('restore-main-app').onclick = () => action('launch', async () => { const result = await api.restoreMainApp(); if (result.cancelled) return; await refresh(true); toast('已恢复接管前的主应用配置'); if (result.warning) toast(result.warning, 'error'); });
+$('restore-main-app').onclick = () => action('launch', async () => { const result = await api.restoreMainApp(); if (result.cancelled) return; await refresh(true); toast('已还原接管前的 Codex 配置'); if (result.warning) toast(result.warning, 'error'); });
 $('choose-app').onclick = () => action('app-path', async () => { await api.chooseApp(); await refresh(true); });
 $('account-list').onclick = event => {
   if (event.target.closest('[data-speed-id]')) return;
   const button = event.target.closest('[data-action]');
   if (button?.dataset.action === 'launch') { state.selected = button.dataset.id; renderAccounts(); if ($('launch').disabled) { toast('请先完成右侧启动设置', 'info'); $('launch-target').focus(); } else void launch(false); return; }
-  if (button) { const { action, id } = button.dataset; if (action === 'usage') void refreshUsage(id); if (action === 'test') void testAccount(id); if (action === 'edit') editDialog(id); if (action === 'import') void importFiles(); if (action === 'switch') void selectAccount(id); if (action === 'pelican') { pelicanState.selected = new Set([id]); switchPage('pelican'); } return; }
+  if (button) { const { action, id } = button.dataset; if (action === 'usage') void refreshUsage(id); if (action === 'test') void testAccount(id); if (action === 'edit') editDialog(id); if (action === 'import') pasteDialog(); if (action === 'switch') void selectAccount(id); if (action === 'pelican') { pelicanState.selected = new Set([id]); switchPage('pelican'); } return; }
   const card = event.target.closest('.account-card'); if (card) { state.selected = card.dataset.id; renderAccounts(); }
 };
 $('account-list').onkeydown = event => { if (event.target.classList.contains('account-card') && ['Enter', ' '].includes(event.key)) { event.preventDefault(); state.selected = event.target.dataset.id; renderAccounts(); } };
@@ -312,7 +385,7 @@ $('directory').oninput = updateButtons;
 $('context-window').oninput = updateContextLabel; $('compact-limit').oninput = updateContextLabel;
 $('launch').onclick = () => launch(false); $('resume').onclick = () => launch(true);
 $('history-list').onclick = event => { const button = event.target.closest('[data-history]'); if (button) { const record = state.data.codex.history.find(record => record.id === button.dataset.history); if (record) void launch(button.dataset.resume === 'true', record); } };
-$('save-settings').onclick = () => action('settings', async () => { await api.saveSettings({ proxy_url: $('proxy').value, auto_refresh: $('auto-refresh').checked, usage_probe: $('usage-probe').checked }); toast('连接设置已保存'); });
+$('save-settings').onclick = () => action('settings', async () => { await api.saveSettings({ proxy_url: $('proxy').value, bps_transport: $('bps-transport').value, auto_refresh: $('auto-refresh').checked, usage_probe: $('usage-probe').checked }); toast('连接设置已保存'); });
 $('theme').onchange = () => action('theme', async () => { applyTheme($('theme').value); await api.preferences({ theme: $('theme').value }); });
 $('channel').onchange = () => action('channel', async () => { launchChannel($('channel').value, $('model').value); await api.preferences({ channel: $('channel').value }); renderAccounts(); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme($('theme').value));
@@ -321,6 +394,7 @@ $('open-data').onclick = () => action('data', () => api.openData());
 $('copy-install').onclick = () => action('install', async () => { await api.copyInstall(); toast('已复制安装命令，请在终端运行后重启客户端'); });
 $('repair-service').onclick = () => action('repair', async () => { await api.repairService(); await refresh(); });
 $('reload-logs').onclick = loadLogs;
+$('export-quality').onclick = () => action('export-quality', async () => { if (await api.exportQuality()) toast('协议观测已导出'); });
 $('modal').addEventListener('click', event => { if (event.target === $('modal')) { const r = $('modal').getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) closeModal(); } });
 let dragDepth = 0;
 document.addEventListener('dragenter', event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); dragDepth++; $('drop-overlay').hidden = false; } });

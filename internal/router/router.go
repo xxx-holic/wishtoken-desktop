@@ -20,6 +20,7 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/basispoints"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
+	"github.com/xxx-holic/wishtoken-desktop/internal/localcodex"
 	"github.com/xxx-holic/wishtoken-desktop/internal/pool"
 	"github.com/xxx-holic/wishtoken-desktop/internal/upstream"
 )
@@ -30,10 +31,12 @@ type object = map[string]any
 const (
 	RouteBPS   = "bps"
 	RouteCodex = "codex"
+	RouteWork  = "work"
 )
 
 // Router executes Responses requests.
 type Router struct {
+	Work        func(context.Context, *Request, string) (*Result, *Error)
 	Config      func() *config.Config
 	Pool        *pool.Pool
 	BPS         *upstream.BPSClient
@@ -46,20 +49,102 @@ type Router struct {
 
 // Record describes one upstream attempt.
 type Record struct {
-	Time          time.Time `json:"time"`
-	Route         string    `json:"route"`
-	Model         string    `json:"model"`
-	Effort        string    `json:"effort,omitempty"`
-	Account       string    `json:"account"`
-	Status        int       `json:"status"`
-	Duration      float64   `json:"duration_ms"`
-	Error         string    `json:"error,omitempty"`
-	Fallback      string    `json:"fallback,omitempty"`
-	Client        string    `json:"client,omitempty"`
-	ServiceTier   string    `json:"service_tier,omitempty"`
-	ResponseTier  string    `json:"response_service_tier,omitempty"`
-	ResponseModel string    `json:"response_model,omitempty"`
-	StreamStatus  string    `json:"stream_status,omitempty"`
+	Time                   time.Time `json:"time"`
+	Route                  string    `json:"route"`
+	Model                  string    `json:"model"`
+	Effort                 string    `json:"effort,omitempty"`
+	Account                string    `json:"account"`
+	Status                 int       `json:"status"`
+	Duration               float64   `json:"duration_ms"`
+	Error                  string    `json:"error,omitempty"`
+	Fallback               string    `json:"fallback,omitempty"`
+	Client                 string    `json:"client,omitempty"`
+	ServiceTier            string    `json:"service_tier,omitempty"`
+	ResponseTier           string    `json:"response_service_tier,omitempty"`
+	ResponseModel          string    `json:"response_model,omitempty"`
+	StreamStatus           string    `json:"stream_status,omitempty"`
+	RequestTurnStateLength int       `json:"request_turn_state_length,omitempty"`
+	TurnStateLength        int       `json:"turn_state_length,omitempty"`
+	SafetyBuffering        string    `json:"safety_buffering,omitempty"`
+	SafetyFasterModel      string    `json:"safety_faster_model,omitempty"`
+	ModelMismatch          bool      `json:"model_mismatch,omitempty"`
+	Quality                string    `json:"quality,omitempty"`
+	Transport              string    `json:"transport,omitempty"`
+	InputTokens            int64     `json:"input_tokens,omitempty"`
+	CachedInputTokens      int64     `json:"cached_input_tokens,omitempty"`
+	OutputTokens           int64     `json:"output_tokens,omitempty"`
+	ReasoningTokens        int64     `json:"reasoning_tokens,omitempty"`
+}
+
+func copyQualityHeaders(dst, src http.Header) {
+	for _, name := range []string{"X-Codex-Turn-State", "X-Codex-Safety-Buffering-Enabled", "X-Codex-Safety-Buffering-Faster-Model"} {
+		if value := strings.TrimSpace(src.Get(name)); value != "" {
+			dst.Set(name, value)
+		}
+	}
+}
+
+func requestTurnStateLength(header http.Header) int {
+	if header == nil {
+		return 0
+	}
+	return len(strings.TrimSpace(header.Get("X-Codex-Turn-State")))
+}
+
+func noteQualityHeaders(rec *Record, header http.Header) {
+	if header == nil {
+		return
+	}
+	rec.TurnStateLength = len(strings.TrimSpace(header.Get("X-Codex-Turn-State")))
+	rec.SafetyBuffering = strings.TrimSpace(header.Get("X-Codex-Safety-Buffering-Enabled"))
+	rec.SafetyFasterModel = strings.TrimSpace(header.Get("X-Codex-Safety-Buffering-Faster-Model"))
+}
+
+func normalizeModelName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, suffix := range []string{":bps", ":codex", "-bps", "-excel", "-1m"} {
+		name = strings.TrimSuffix(name, suffix)
+	}
+	return name
+}
+
+// modelsEquivalent tolerates date/snapshot suffixes but never treats a
+// degrade/luna substitution as the requested model.
+func modelsEquivalent(requested, served string) bool {
+	a, b := normalizeModelName(requested), normalizeModelName(served)
+	if a == "" || b == "" {
+		return true
+	}
+	if a == b {
+		return true
+	}
+	if strings.Contains(b, "degrade") || (strings.Contains(b, "luna") && !strings.Contains(a, "luna")) {
+		return false
+	}
+	for _, pair := range [][2]string{{a, b}, {b, a}} {
+		if prefix := pair[0] + "-"; strings.HasPrefix(pair[1], prefix) {
+			tail := strings.TrimPrefix(pair[1], prefix)
+			if tail != "" && strings.Trim(tail, "0123456789-") == "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func applyQuality(rec *Record) {
+	rec.ModelMismatch = false
+	if rec.ResponseModel == "" || rec.Model == "" {
+		rec.Quality = "unknown"
+		return
+	}
+	// Headers and model names are observable signals, never an intelligence test.
+	rec.ModelMismatch = !modelsEquivalent(rec.Model, rec.ResponseModel)
+	if rec.ModelMismatch {
+		rec.Quality = "model_mismatch"
+	} else {
+		rec.Quality = "model_match"
+	}
 }
 
 // Request is a Responses request from any front end.
@@ -118,6 +203,56 @@ func (r *Router) Responses(ctx context.Context, req *Request) (*Result, *Error) 
 	requested := strings.TrimSpace(str(body["model"]))
 	if requested == "" {
 		requested = cfg.DefaultModel
+	}
+	// Work has a separate browser identity and transport. Never enter pool retry,
+	// token refresh, BPS normalization or native fallback for this explicit route.
+	workChannel := strings.TrimSpace(req.Headers.Get("X-GPTBridge-Channel"))
+	if workChannel == RouteWork || strings.HasSuffix(requested, "-wm") {
+		if workChannel != "" && workChannel != RouteWork {
+			return nil, apiErr(400, "channel_conflict", "Work model conflicts with pinned channel")
+		}
+		if !cfg.DesktopMode || r.Work == nil {
+			return nil, apiErr(503, "work_unavailable", "Work requires the running desktop browser bridge")
+		}
+		if !localcodex.WorkModelAllowed(requested) {
+			return nil, apiErr(400, "work_model", "Work 不支持该模型，请选择 GPT-6 / GPT-5.6 的 Work 模型")
+		}
+		effort := "medium"
+		if reasoning, ok := body["reasoning"].(object); ok {
+			if value := strings.TrimSpace(str(reasoning["effort"])); value != "" {
+				effort = value
+			}
+		}
+		if value := strings.TrimSpace(str(body["reasoning_effort"])); value != "" {
+			effort = value
+		}
+		if !localcodex.WorkEffortAllowed(effort) {
+			return nil, apiErr(400, "work_effort", "Work 推理档位无效，请选择 low / medium / high / xhigh / max")
+		}
+		rec := Record{Time: time.Now(), Route: RouteWork, Model: requested, Effort: effort, Account: accountID, Client: req.Client, Status: 200}
+		res, failure := r.Work(ctx, req, accountID)
+		if failure != nil {
+			rec.Status = failure.Status
+			rec.Error = failure.Message
+			rec.StreamStatus = "failed"
+			rec.Duration = ms(rec.Time)
+			r.observe(rec)
+			return nil, failure
+		}
+		res.Body = &accounting{ReadCloser: res.Body, done: func(response object, err error) {
+			rec.Duration = ms(rec.Time)
+			if response != nil {
+				rec.ResponseModel = str(response["model"])
+				rec.StreamStatus = "completed"
+				applyQuality(&rec)
+			}
+			if err != nil {
+				rec.Error = err.Error()
+				rec.StreamStatus = "failed"
+			}
+			r.observe(rec)
+		}}
+		return res, nil
 	}
 	resolved := basispoints.ResolveModel(requested)
 	channel := strings.TrimSpace(req.Headers.Get("X-GPTBridge-Channel"))
@@ -287,7 +422,7 @@ func (r *Router) executeBPS(ctx context.Context, cfg *config.Config, acc *accoun
 	}
 	cred := r.Pool.Credentials(acc)
 	scope := acc.ID + "|" + acc.AccountID + "|" + sessionKey
-	rec := Record{Time: start, Route: RouteBPS, Model: resolved.Upstream, Account: acc.Label(), Client: req.Client}
+	rec := Record{Time: start, Route: RouteBPS, Model: resolved.Upstream, Account: acc.Label(), Client: req.Client, RequestTurnStateLength: requestTurnStateLength(req.Headers)}
 
 	// Inline images become gateway attachments.
 	plan, err := basispoints.PlanImages(raw)
@@ -335,7 +470,10 @@ func (r *Router) executeBPS(ctx context.Context, cfg *config.Config, acc *accoun
 		}
 		return nil, outcome{action: act, reason: category, err: apiErr(http.StatusBadRequest, "basispoints_request_invalid", basispoints.UserMessage(err))}
 	}
-	resp, err := r.BPS.Responses(ctx, cred, prepared.Body)
+	bps := *r.BPS
+	bps.Transport = cfg.BPSTransport
+	rec.Transport = cfg.BPSTransport
+	resp, err := bps.Responses(ctx, cred, prepared.Body)
 	if err != nil {
 		rec.Error = err.Error()
 		rec.Duration = ms(start)
@@ -348,6 +486,7 @@ func (r *Router) executeBPS(ctx context.Context, cfg *config.Config, acc *accoun
 	}
 	rec.Status = resp.StatusCode
 	rec.Duration = ms(start)
+	noteQualityHeaders(&rec, resp.Header)
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
@@ -361,22 +500,30 @@ func (r *Router) executeBPS(ctx context.Context, cfg *config.Config, acc *accoun
 	if perr != nil {
 		resp.Body.Close()
 		rec.Error = perr.Error()
+		rec.StreamStatus = "failed"
+		rec.Duration = ms(start)
 		r.observe(rec)
 		return nil, outcome{action: actionFallbackNative, reason: "empty_stream", err: apiErr(http.StatusBadGateway, "basispoints_empty_stream", perr.Error())}
 	}
 	if code, message, failed := failedEvent(peek); failed {
 		reader.Close()
 		rec.Error = code + ": " + message
+		rec.StreamStatus = "failed"
+		rec.Duration = ms(start)
 		r.observe(rec)
-		he := &upstream.HTTPError{Status: 200, Body: fmt.Sprintf(`{"error":{"code":%q,"message":%q}}`, code, message), Upstream: "basispoints"}
+		// The HTTP/WS handshake succeeded, but generation failed before any
+		// output. Preserve upstream status in the record, not in the API error.
+		he := &upstream.HTTPError{Status: http.StatusBadGateway, Body: fmt.Sprintf(`{"error":{"code":%q,"message":%q}}`, code, message), Upstream: "basispoints"}
 		return nil, r.classifyFailure(acc, RouteBPS, resp, he, resolved.Upstream)
 	}
 	r.observe(rec)
 	stream := prepared.Bridge.Stream(reader)
 	header := http.Header{}
 	header.Set("X-GPTBridge-Upstream", "basispoints")
+	header.Set("X-GPTBridge-BPS-Transport", cfg.BPSTransport)
 	header.Set("X-GPTBridge-Reasoning-Effort", prepared.Effort)
 	header.Set("X-GPTBridge-Account", account.MaskID(acc.AccountID))
+	copyQualityHeaders(header, resp.Header)
 	if len(removed) > 0 {
 		header.Set("X-GPTBridge-Stripped-Tools", strings.Join(removed, ","))
 	}
@@ -398,7 +545,7 @@ func (r *Router) executeCodex(ctx context.Context, cfg *config.Config, acc *acco
 		return nil, outcome{err: apiErr(http.StatusBadRequest, "invalid_request", err.Error())}
 	}
 	cred := r.Pool.Credentials(acc)
-	rec := Record{Time: start, Route: RouteCodex, Model: resolved.Upstream, Account: acc.Label(), Client: req.Client, ServiceTier: str(working["service_tier"])}
+	rec := Record{Time: start, Route: RouteCodex, Model: resolved.Upstream, Account: acc.Label(), Client: req.Client, ServiceTier: str(working["service_tier"]), RequestTurnStateLength: requestTurnStateLength(req.Headers)}
 	resp, err := r.Codex.Responses(ctx, cred, raw, req.Headers, upstream.SessionHeaders{SessionID: sessionKey})
 	if err != nil {
 		rec.Error = err.Error()
@@ -412,6 +559,7 @@ func (r *Router) executeCodex(ctx context.Context, cfg *config.Config, acc *acco
 	}
 	rec.Status = resp.StatusCode
 	rec.Duration = ms(start)
+	noteQualityHeaders(&rec, resp.Header)
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
@@ -424,6 +572,7 @@ func (r *Router) executeCodex(ctx context.Context, cfg *config.Config, acc *acco
 	header := http.Header{}
 	header.Set("X-GPTBridge-Upstream", "codex")
 	header.Set("X-GPTBridge-Account", account.MaskID(acc.AccountID))
+	copyQualityHeaders(header, resp.Header)
 	effort := ""
 	if reasoning, ok := working["reasoning"].(object); ok {
 		effort = str(reasoning["effort"])
@@ -500,6 +649,16 @@ func (r *Router) finishObserved(accountID string, rec Record) func(object, error
 			rec.ResponseModel = str(response["model"])
 			rec.ResponseTier = str(response["service_tier"])
 			rec.StreamStatus = "completed"
+			if usage, ok := response["usage"].(object); ok {
+				rec.InputTokens, rec.OutputTokens = toInt(usage["input_tokens"]), toInt(usage["output_tokens"])
+				if details, ok := usage["input_tokens_details"].(object); ok {
+					rec.CachedInputTokens = toInt(details["cached_tokens"])
+				}
+				if details, ok := usage["output_tokens_details"].(object); ok {
+					rec.ReasoningTokens = toInt(details["reasoning_tokens"])
+				}
+			}
+			applyQuality(&rec)
 		}
 		if err != nil {
 			rec.StreamStatus = "failed"
