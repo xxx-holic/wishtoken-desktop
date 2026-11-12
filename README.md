@@ -15,6 +15,7 @@ WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子
 ## 功能
 
 - 多账号导入：支持 Sub2API 导出、Codex auth JSON 及兼容的账号 JSON；搜索、备注、排序、额度进度和重置时间。
+- 子号账密 + 2FA 导入：每行 `邮箱----密码----2FA种子`，默认纯协议完成原生或 BPS 授权；多工作区明确选择，逐项显示结果，浏览器自动化仅作显式备用。
 - 选择 BPS、原生 Codex 或 ChatGPT Work 通道，默认 BPS；会话固定账号与通道，失败不会静默改用另一通道。Work 为本地预览功能，需单独绑定网页登录。
 - BPS 传输可显式选择 HTTP 或实验 WebSocket；运行记录区分输入、缓存、输出和推理 tokens。验证范围见 [BPS 传输与对照测试](docs/BPS_TRANSPORT.md)。
 - 一键切换并启动：默认切换主 Codex App，沿用原有项目、会话和应用数据；无需项目目录。首次接管备份配置，设置中可恢复；独立实例可手动选择。CLI 按账号和项目隔离。
@@ -26,7 +27,7 @@ WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子
 
 ## 下载和开始使用
 
-当前源码为 `0.9.0-bps-preview.3`，尚未发布到 GitHub Releases。BPS WebSocket 已完成本地协议测试，直接生成仍需有效授权验证；Work 登录、API 和测试步骤见 [Work 预览说明](docs/WORK_PREVIEW.md)。
+当前源码为 `0.9.0-bps-preview.5`，尚未发布到 GitHub Releases。BPS 独立授权、直接生成、图片和工具往返已有实测；新增子号纯协议导入的验证范围见 [BPS 说明](docs/BPS_TRANSPORT.md)。Work 登录、API 和测试步骤见 [Work 预览说明](docs/WORK_PREVIEW.md)。
 
 在 [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases) 下载：
 
@@ -38,7 +39,7 @@ WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子
 | Linux x64 | `WishToken-Desktop-<版本>-linux-x64.AppImage`、`.deb`、`.tar.gz` | Ubuntu 24.04 原生构建；CLI 联动，GUI App 需另行安装兼容版本 |
 
 1. 安装客户端，并另外安装官方 Codex App 或 CLI。客户端不会捆绑官方 Codex。
-2. 导入自己的账号 JSON，点击刷新额度。
+2. 粘贴自己的账号 JSON，或从“授权登录”按账密 + 2FA 完成原生/BPS 协议授权，再刷新额度。
 3. 选择账号、通道、模型与推理档位，点击“切换并启动”。App 无需填写目录。
 4. 遇到 BPS 403 时查看错误；额度正常不代表 BPS 权限正常。可手动选择原生通道测试。
 
@@ -54,7 +55,7 @@ Linux 安装和系统终端要求见 [Linux 说明](docs/LINUX.md)。本项目�
 
 ## 从源码构建
 
-需要 Go 1.25+、Node.js 24、npm。Go 核心没有第三方依赖，桌面采用 Electron 和原生 HTML/CSS/JS。
+需要 Go 1.25+、Node.js 24、npm。Go 核心没有第三方依赖，桌面采用 Electron 和原生 HTML/CSS/JS。构建协议授权组件还需要 Python 3.12：在仓库根目录运行 `python -m pip install -r desktop/protocol/requirements.txt pyinstaller==6.21.0`；Windows/macOS/Linux 安装包自带对应组件，使用者无需安装 Python。
 
 ```sh
 git clone https://github.com/xxx-holic/wishtoken-desktop.git

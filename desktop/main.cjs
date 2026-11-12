@@ -15,6 +15,7 @@ const { CANDY_PROMPT } = require('./lib/benchmarks.cjs');
 const { Work } = require('./lib/work.cjs');
 const { externalLink } = require('./lib/links.cjs');
 const { loginAction, loginURL } = require('./lib/login.cjs');
+const { AutoLogin } = require('./lib/auto-login.cjs');
 
 const dataHome = process.env.GPTBRIDGE_DESKTOP_HOME || path.join(os.homedir(), '.gptbridge-desktop');
 const primaryHome = mainProfile.mainHome();
@@ -23,7 +24,7 @@ app.setPath('userData', path.join(dataHome, 'shell'));
 app.setAppUserModelId('app.gptbridge.team');
 const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
-let window, tray, service, pelican, work, codexApp, quitting = false, allowQuit = false;
+let window, tray, service, pelican, work, autoLogin, codexApp, quitting = false, allowQuit = false;
 const page = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href;
 const prefsPath = path.join(dataHome, 'desktop.json');
 let prefs = {};
@@ -51,6 +52,7 @@ async function requestQuit() {
       if (!/没有可恢复|不一致|备份不存在|config.toml 不存在/.test(safeError(error))) dialog.showErrorBox('恢复 Codex 配置失败', safeError(error));
     }
   }
+  await autoLogin?.close();
   await pelican?.close();
   await service?.stop();
   await work?.close();
@@ -90,7 +92,15 @@ async function handle(method, input) {
       return result.canceled ? null : importPaths(result.filePaths);
     }
     case 'importPaths': return importPaths(input);
-    case 'loginStart': return loginAction(service, 'start', input);
+    case 'loginStart':
+      if (autoLogin.busy()) throw new Error('自动授权正在进行，请先完成或取消。');
+      return loginAction(service, 'start', input);
+    case 'autoLoginStart': return autoLogin.start(input);
+    case 'autoLoginStatus': return autoLogin.snapshot(input);
+    case 'autoLoginCancel': return autoLogin.cancel(input);
+    case 'autoLoginSkip': return autoLogin.skip(input);
+    case 'autoLoginOpen': return autoLogin.open(input);
+    case 'autoLoginChoose': return autoLogin.choose(input);
     case 'loginStatus': return loginAction(service, 'status', input);
     case 'loginCancel': return loginAction(service, 'cancel', input);
     case 'loginOpen': {
@@ -264,6 +274,7 @@ if (lock) {
     const binary = app.isPackaged ? path.join(process.resourcesPath, 'backend', executable) : path.join(__dirname, 'backend', `${platformFolder}-${process.arch}`, executable);
     work = new Work(dataHome); await work.listen();
     service = new BridgeService({ home: dataHome, binary, work });
+    autoLogin = new AutoLogin({ service, home: dataHome });
     pelican = new Pelican(dataHome, (body, signal) => service.request('/api/pelican/generate', 'POST', body, 910000, signal));
     await pelican.listen();
     const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));

@@ -1,6 +1,6 @@
 {
   "name": "wishtoken-desktop",
-  "version": "0.9.0-bps-preview.4",
+  "version": "0.9.0-bps-preview.5",
   "private": true,
   "description": "WishToken companion for local Codex accounts, explicit channels and existing workspaces",
   "main": "main.cjs",
@@ -10,10 +10,11 @@
     "start": "electron .",
     "test": "node --test test/*.test.cjs",
     "backend": "node scripts/build-backend.cjs",
-    "pack:win": "npm run backend -- win32 x64 && electron-builder --win dir --x64",
-    "dist:win": "npm run backend -- win32 x64 && electron-builder --win zip nsis --x64",
-    "dist:mac": "npm run backend -- darwin arm64 && npm run backend -- darwin x64 && electron-builder --mac zip --arm64 --x64",
-    "dist:linux": "npm run backend -- linux x64 && electron-builder --linux AppImage deb tar.gz --x64",
+    "login-helper": "node scripts/build-login-helper.cjs",
+    "pack:win": "npm run login-helper && npm run backend -- win32 x64 && electron-builder --win dir --x64",
+    "dist:win": "npm run login-helper && npm run backend -- win32 x64 && electron-builder --win zip nsis --x64",
+    "dist:mac": "npm run login-helper && npm run backend && electron-builder --mac zip",
+    "dist:linux": "npm run login-helper && npm run backend -- linux x64 && electron-builder --linux AppImage deb tar.gz --x64",
     "pack:mac:cross": "npm run backend -- darwin arm64 && npm run backend -- darwin x64 && node scripts/package-mac.cjs",
     "smoke": "node test/features-smoke.cjs"
   },

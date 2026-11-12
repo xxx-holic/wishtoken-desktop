@@ -602,7 +602,9 @@ func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Channel string `json:"channel"`
+		Channel       string `json:"channel"`
+		ExpectedEmail string `json:"expected_email"`
+		Fresh         bool   `json:"fresh"`
 	}
 	if r.Body != nil {
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 1024))
@@ -618,10 +620,15 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 400, "invalid_login_channel", "invalid_request_error", "choose Codex or BPS authorization")
 		return
 	}
+	input.ExpectedEmail = strings.ToLower(strings.TrimSpace(input.ExpectedEmail))
+	if len(input.ExpectedEmail) > 254 || (input.ExpectedEmail != "" && (!strings.Contains(input.ExpectedEmail, "@") || strings.ContainsAny(input.ExpectedEmail, "\r\n\t "))) {
+		writeError(w, r, 400, "invalid_login_identity", "invalid_request_error", "invalid expected login email")
+		return
+	}
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	if s.login != nil && !s.login.Done() {
-		if input.Channel != s.login.Channel {
+		if input.Fresh || input.Channel != s.login.Channel || input.ExpectedEmail != s.loginExpectedEmail {
 			writeError(w, r, 409, "login_in_progress", "invalid_request_error", "cancel the current login before changing authorization channel")
 			return
 		}
@@ -646,6 +653,7 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.login = session
+	s.loginExpectedEmail = input.ExpectedEmail
 	s.loginID = fmt.Sprint(time.Now().UnixNano())
 	s.loginAt = time.Now()
 	id := s.loginID
@@ -658,6 +666,10 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 		}
 		acc := account.Account{Source: session.Channel + "-browser-login"}
 		oauth.Apply(&acc, tokens)
+		if err := validateLoginIdentity(acc, input.ExpectedEmail, session.Channel); err != nil {
+			s.setLoginResult(id, "", err)
+			return
+		}
 		up, err := s.Store.Upsert(acc)
 		if err != nil {
 			s.setLoginResult(id, "", err)
@@ -666,6 +678,20 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 		s.setLoginResult(id, up.ID, nil)
 	}()
 	api.WriteJSON(w, http.StatusOK, object{"auth_url": session.AuthURL, "session": s.loginID, "channel": session.Channel, "user_code": session.UserCode})
+}
+
+func validateLoginIdentity(acc account.Account, email, channel string) error {
+	if email != "" && !strings.EqualFold(strings.TrimSpace(acc.Email), email) {
+		return fmt.Errorf("login identity mismatch; account was not saved")
+	}
+	client := account.CodexOAuthClientID
+	if channel == "bps" {
+		client = account.BPSOAuthClientID
+	}
+	if acc.OAuthClientID != "" && acc.OAuthClientID != client {
+		return fmt.Errorf("login client identity mismatch; account was not saved")
+	}
+	return nil
 }
 
 var loginResults sync.Map // session id -> object

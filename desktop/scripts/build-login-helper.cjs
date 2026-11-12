@@ -1,0 +1,14 @@
+'use strict';
+const {spawnSync}=require('node:child_process');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const python=process.env.GPTBRIDGE_PROTOCOL_PYTHON||'python';
+const platform={win32:'win',darwin:'mac',linux:'linux'}[process.platform];
+if(!platform||!['x64','arm64'].includes(process.arch))throw Error('Unsupported protocol helper platform');
+const folder=`${platform}-${process.arch}`;
+const result=spawnSync(python,['-m','PyInstaller','--noconfirm','--clean','--onefile','--name','wish-login-http','--distpath',path.join(root,'login-helper',folder),'--workpath',path.join(root,'../build/login-helper',folder),'--specpath',path.join(root,'../build/login-helper',folder),'--collect-binaries','curl_cffi','--collect-data','curl_cffi','--copy-metadata','curl_cffi','--exclude-module','IPython','--exclude-module','numpy',path.join(root,'protocol/http_worker.py')],{cwd:root,stdio:'inherit',windowsHide:true});
+if(result.error)throw result.error;
+if(result.status)process.exit(result.status);
+const notices=spawnSync(python,[path.join(__dirname,'login-helper-notices.py'),path.join(root,'login-helper',folder)],{cwd:root,stdio:'inherit',windowsHide:true});
+if(notices.error)throw notices.error;
+process.exitCode=notices.status||0;

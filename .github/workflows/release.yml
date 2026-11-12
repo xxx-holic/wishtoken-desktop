@@ -56,6 +56,11 @@ jobs:
         working-directory: desktop
       - run: npm test
         working-directory: desktop
+      - name: Build bundled protocol login transport
+        run: |
+          python -m pip install -r desktop/protocol/requirements.txt pyinstaller==6.21.0
+          npm --prefix desktop run login-helper
+          node desktop/test/login-helper-smoke.cjs
       - name: Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |

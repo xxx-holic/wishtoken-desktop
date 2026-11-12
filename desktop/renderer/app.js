@@ -308,11 +308,15 @@ function editDialog(id) {
   };
 }
 let loginGeneration = 0, activeLogin = null;
-function loginDialog() {
-  modal('<h2>授权登录</h2><p>BPS 和 Codex 是同一账号的两种独立授权。浏览器中完成登录，客户端不收集密码或验证码。</p><div class="modal-actions"><button class="secondary" id="login-codex">Codex 原生授权</button><button class="primary" id="login-bps">BPS 授权</button></div><p id="login-progress" role="status"></p><div id="login-device" hidden><label class="field-label" for="login-code">在授权页输入此设备码</label><input id="login-code" class="full" readonly><p>核对浏览器中显示的账号后完成授权；完成后自动导入。</p></div><div class="modal-actions"><button class="secondary" id="cancel-login">取消</button><button class="primary" id="open-login" hidden>打开授权页</button></div>');
+function manualLoginDialog() {
+  $('modal').classList.remove('auto-login-dialog');
+  $('modal').removeAttribute('aria-labelledby');
+  modal('<h2>授权登录</h2><div class="login-tabs"><button class="secondary" id="login-auto">账密 + 2FA 自动授权</button><button class="secondary" aria-current="page">手动浏览器授权</button></div><p>BPS 和 Codex 是同一账号的两种独立授权。请在浏览器中完成登录，成功后自动导入。</p><div class="modal-actions"><button class="secondary" id="login-codex">Codex 原生授权</button><button class="primary" id="login-bps">BPS 授权</button></div><p id="login-progress" role="status"></p><div id="login-device" hidden><label class="field-label" for="login-code">在授权页输入此设备码</label><input id="login-code" class="full" readonly><p>核对浏览器中显示的账号后完成授权；完成后自动导入。</p></div><div class="modal-actions"><button class="secondary" id="cancel-login">取消</button><button class="primary" id="open-login" hidden>打开授权页</button></div>');
+  $('login-auto').onclick = loginDialog;
   const generation = ++loginGeneration;
   $('cancel-login').onclick = closeModal;
   for (const type of ['codex', 'bps']) $('login-' + type).onclick = async () => {
+    $('login-auto').disabled = true;
     $('login-codex').disabled = $('login-bps').disabled = true;
     $('login-progress').textContent = '正在创建授权…';
     try {
@@ -343,6 +347,7 @@ function loginDialog() {
           $('login-progress').textContent = error.message;
           $('open-login').hidden = true;
           $('login-codex').disabled = $('login-bps').disabled = false;
+          $('login-auto').disabled = false;
         }
       };
       void poll();
@@ -350,6 +355,7 @@ function loginDialog() {
       if (generation !== loginGeneration) return;
       $('login-progress').textContent = error.message;
       $('login-codex').disabled = $('login-bps').disabled = false;
+      $('login-auto').disabled = false;
     }
   };
 }
@@ -403,7 +409,7 @@ function updateContextLabel() { document.querySelector('.advanced summary span')
 
 document.querySelector('nav').addEventListener('click', event => { const button = event.target.closest('[data-page]'); if (button) switchPage(button.dataset.page); });
 $('import-files').onclick = pasteDialog;
-$('login-account').onclick = loginDialog;
+$('login-account').onclick = () => loginDialog();
 $('modal').addEventListener('close', () => {
   loginGeneration++;
   const pending = activeLogin; activeLogin = null;

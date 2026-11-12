@@ -23,6 +23,8 @@ Team 0.2 的 `internal/localcodex/models.json` 来自 2026-09-30 账号可访问
 
 Work 预览通道使用 [Playwright Core](https://github.com/microsoft/playwright) 1.63.0（Apache-2.0），连接用户明确选择的浏览器标签页或启动独立登录 Profile；不捆绑浏览器安装包。依赖许可证随桌面包保留在模块目录。Work 协议实现来自本项目对已授权网页的实测；产品入口线索参考 [prodex](https://github.com/youdie006/prodex)，未复制其源码。
 
+协议授权的独立 HTTP 组件使用 curl_cffi 0.15.0（MIT）、Python 3.12（PSF License）和 PyInstaller 6.21.0（GPL-2.0 with bootloader exception）构建，依赖许可随辅助程序打包。账密/TOTP 状态机为本项目实现；Cockpit Tools v1.3.81 的导入交互仅作为产品参考，未复制其实现源码。
+
 - 本项目与 OpenAI、Microsoft 无关，未获得其背书。
 - Basispoints 是面向 Excel 加载项的非公开后端，在 Excel 之外使用它可能违反 OpenAI 的服务条款，账号可能被限制。请只用自己的账号、在自己的设备上使用，不要暴露到公网、不要分享或转售。
 - 上游接口随时可能变化；本项目不提供任何保证。

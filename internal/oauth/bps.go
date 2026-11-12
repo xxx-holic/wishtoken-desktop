@@ -22,8 +22,9 @@ import (
 const bpsAuthBase = "https://auth.openai.com"
 const bpsRedirectURI = bpsAuthBase + "/basispoints/deviceauth/callback"
 
-// StartBPSLogin starts the independent Office device grant. Browser approval
-// remains in the user's browser; passwords and MFA secrets never enter the app.
+// StartBPSLogin starts the independent Office device grant. The desktop may
+// approve it through an isolated protocol session or the user's browser. This
+// backend receives only the device grant, never the password or MFA seed.
 func StartBPSLogin(ctx context.Context, client *http.Client) (*LoginSession, error) {
 	return startBPSLogin(ctx, client, waitBPSPoll)
 }

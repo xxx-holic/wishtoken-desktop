@@ -52,10 +52,11 @@ type Server struct {
 	stopMu    sync.Mutex
 	stop      context.CancelFunc
 
-	loginMu sync.Mutex
-	login   *oauth.LoginSession
-	loginID string
-	loginAt time.Time
+	loginMu            sync.Mutex
+	login              *oauth.LoginSession
+	loginID            string
+	loginAt            time.Time
+	loginExpectedEmail string
 }
 
 // New wires the bridge components together.

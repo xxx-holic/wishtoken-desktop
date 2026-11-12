@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/oauth"
 )
 
@@ -42,6 +43,13 @@ func TestLoginChannelAndSessionBinding(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"reused":true`) || strings.Contains(w.Body.String(), "private-device-id") {
 		t.Fatal("BPS prompt leaked private device state")
 	}
+	for _, body := range []string{`{"channel":"bps","fresh":true}`, `{"channel":"bps","expected_email":"child@example.test"}`} {
+		w = httptest.NewRecorder()
+		f.srv.adminLoginStart(w, httptest.NewRequest("POST", "/api/login/start", strings.NewReader(body)))
+		if w.Code != 409 {
+			t.Fatal("automatic login reused unrelated active authorization")
+		}
+	}
 	for _, path := range []string{"/api/login/status?session=stale", "/api/login/cancel?session=stale"} {
 		w = httptest.NewRecorder()
 		r = httptest.NewRequest("POST", path, nil)
@@ -58,5 +66,22 @@ func TestLoginChannelAndSessionBinding(t *testing.T) {
 	f.srv.adminLoginCancel(w, httptest.NewRequest("POST", "/api/login/cancel?session=fixture-session", nil))
 	if w.Code != 200 || !s.Done() {
 		t.Fatal("cancel did not stop authorization")
+	}
+}
+
+func TestLoginRejectsUnexpectedIdentityBeforeSave(t *testing.T) {
+	acc := account.Account{Email: "Child@example.test", OAuthClientID: account.BPSOAuthClientID}
+	if err := validateLoginIdentity(acc, "child@example.test", "bps"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateLoginIdentity(acc, "different@example.test", "bps"); err == nil {
+		t.Fatal("wrong member accepted")
+	}
+	if err := validateLoginIdentity(acc, "child@example.test", "codex"); err == nil {
+		t.Fatal("wrong grant accepted")
+	}
+	acc.Email = ""
+	if err := validateLoginIdentity(acc, "child@example.test", "bps"); err == nil {
+		t.Fatal("missing member accepted")
 	}
 }

@@ -22,7 +22,9 @@ func TestWindowsDaemonCompatibilityAndResume(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, resume := range []bool{false, true} {
-				out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodedCommand(windowsTerminalScript(Options{Directory: dir, Resume: resume}, bin))).CombinedOutput()
+				// Match Launch: retain the user's execution policy. This locally
+				// generated fixture does not need an execution-policy override.
+				out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedCommand(windowsTerminalScript(Options{Directory: dir, Resume: resume}, bin))).CombinedOutput()
 				if err != nil {
 					t.Fatalf("%v: %s", err, out)
 				}
