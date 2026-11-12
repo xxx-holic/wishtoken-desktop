@@ -222,7 +222,7 @@ func looksLikeCredential(m map[string]any) bool {
 }
 
 func addEntry(m map[string]any, source string, res *ImportResult) {
-	if kind := strings.ToLower(getString(m, "type", "provider", "channel")); kind != "" && kind != "codex" && kind != "openai" && kind != "chatgpt" {
+	if kind := strings.ToLower(getString(m, "type", "provider", "channel")); kind != "" && kind != "codex" && kind != "openai" && kind != "chatgpt" && kind != "bps" {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("skipped a %q credential (only Codex/ChatGPT accounts are supported)", kind))
 		res.Skipped++
 		return
@@ -235,16 +235,20 @@ func addEntry(m map[string]any, source string, res *ImportResult) {
 		}
 	}
 	acc := Account{
-		Source:       source,
-		AccessToken:  getString(m, "access_token", "accessToken", "token"),
-		RefreshToken: getString(m, "refresh_token", "refreshToken"),
-		IDToken:      getString(m, "id_token", "idToken"),
-		AccountID:    getString(m, "workspace_id", "account_id", "chatgpt_account_id", "accountId", "chatgptAccountId"),
-		Email:        getString(m, "email", "user_email"),
-		Name:         getString(m, "name", "label", "remark", "note"),
-		PlanType:     getString(m, "plan_type", "planType", "chatgpt_plan_type"),
-		UserID:       getString(m, "user_id", "chatgpt_user_id", "userId"),
-		ProxyURL:     getString(m, "proxy_url", "proxyUrl", "proxy"),
+		Source:        source,
+		AccessToken:   getString(m, "access_token", "accessToken", "token"),
+		RefreshToken:  getString(m, "refresh_token", "refreshToken"),
+		IDToken:       getString(m, "id_token", "idToken"),
+		OAuthClientID: getString(m, "oauth_client_id", "client_id"),
+		AccountID:     getString(m, "workspace_id", "account_id", "chatgpt_account_id", "accountId", "chatgptAccountId"),
+		Email:         getString(m, "email", "user_email"),
+		Name:          getString(m, "name", "label", "remark", "note"),
+		PlanType:      getString(m, "plan_type", "planType", "chatgpt_plan_type"),
+		UserID:        getString(m, "user_id", "chatgpt_user_id", "userId"),
+		ProxyURL:      getString(m, "proxy_url", "proxyUrl", "proxy"),
+	}
+	if acc.OAuthClientID == "" && strings.EqualFold(getString(m, "type", "provider", "channel"), "bps") {
+		acc.OAuthClientID = BPSOAuthClientID
 	}
 	if user, ok := m["user"].(map[string]any); ok {
 		if acc.Email == "" {

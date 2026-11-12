@@ -601,10 +601,31 @@ func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Channel string `json:"channel"`
+	}
+	if r.Body != nil {
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 1024))
+		if err := decoder.Decode(&input); err != nil && err != io.EOF {
+			writeError(w, r, 400, "invalid_login", "invalid_request_error", "invalid login request")
+			return
+		}
+	}
+	if input.Channel == "" {
+		input.Channel = "codex"
+	}
+	if input.Channel != "codex" && input.Channel != "bps" {
+		writeError(w, r, 400, "invalid_login_channel", "invalid_request_error", "choose Codex or BPS authorization")
+		return
+	}
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	if s.login != nil && !s.login.Done() {
-		api.WriteJSON(w, http.StatusOK, object{"auth_url": s.login.AuthURL, "session": s.loginID, "reused": true})
+		if input.Channel != s.login.Channel {
+			writeError(w, r, 409, "login_in_progress", "invalid_request_error", "cancel the current login before changing authorization channel")
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, object{"auth_url": s.login.AuthURL, "session": s.loginID, "channel": s.login.Channel, "user_code": s.login.UserCode, "reused": true})
 		return
 	}
 	client, err := httpx.NewClient(httpx.Options{ProxyURL: s.Config().ProxyURL, Timeout: 60 * time.Second})
@@ -613,7 +634,12 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	session, err := oauth.StartLogin(ctx, client)
+	var session *oauth.LoginSession
+	if input.Channel == "bps" {
+		session, err = oauth.StartBPSLogin(ctx, client)
+	} else {
+		session, err = oauth.StartLogin(ctx, client)
+	}
 	if err != nil {
 		cancel()
 		writeError(w, r, http.StatusConflict, "login_unavailable", "server_error", err.Error())
@@ -630,7 +656,7 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 			s.setLoginResult(id, "", err)
 			return
 		}
-		acc := account.Account{Source: "browser-login"}
+		acc := account.Account{Source: session.Channel + "-browser-login"}
 		oauth.Apply(&acc, tokens)
 		up, err := s.Store.Upsert(acc)
 		if err != nil {
@@ -639,7 +665,7 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 		}
 		s.setLoginResult(id, up.ID, nil)
 	}()
-	api.WriteJSON(w, http.StatusOK, object{"auth_url": session.AuthURL, "session": s.loginID})
+	api.WriteJSON(w, http.StatusOK, object{"auth_url": session.AuthURL, "session": s.loginID, "channel": session.Channel, "user_code": session.UserCode})
 }
 
 var loginResults sync.Map // session id -> object
@@ -660,8 +686,13 @@ func (s *Server) adminLoginStatus(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, object{"active": false})
 		return
 	}
-	res := object{"active": !session.Done(), "session": id, "auth_url": session.AuthURL, "done": session.Done()}
+	if expected := r.URL.Query().Get("session"); expected != "" && expected != id {
+		writeError(w, r, 409, "login_session_changed", "invalid_request_error", "login session changed")
+		return
+	}
+	res := object{"active": true, "session": id, "auth_url": session.AuthURL, "channel": session.Channel, "user_code": session.UserCode, "done": false}
 	if v, ok := loginResults.Load(id); ok {
+		res["active"] = false
 		for k, val := range v.(object) {
 			res[k] = val
 		}
@@ -671,6 +702,11 @@ func (s *Server) adminLoginStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminLoginCancel(w http.ResponseWriter, r *http.Request) {
 	s.loginMu.Lock()
+	if expected := r.URL.Query().Get("session"); expected != "" && expected != s.loginID {
+		s.loginMu.Unlock()
+		writeError(w, r, 409, "login_session_changed", "invalid_request_error", "login session changed")
+		return
+	}
 	if s.login != nil {
 		s.login.Close()
 	}

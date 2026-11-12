@@ -99,6 +99,11 @@ type PickOptions struct {
 
 // Pick returns a copy of the chosen account with a fresh access token.
 func (p *Pool) Pick(ctx context.Context, opts PickOptions) (*account.Account, error) {
+	if opts.AccountID != "" && opts.Route == "codex" {
+		if acc, ok := p.store.Get(opts.AccountID); ok && acc.OAuthClientID == account.BPSOAuthClientID {
+			return nil, errors.New("selected account has BPS authorization; select its separate Codex login for the native channel")
+		}
+	}
 	candidates := p.candidates(opts)
 	if len(candidates) == 0 {
 		if p.store.Count() == 0 {
@@ -133,6 +138,9 @@ func (p *Pool) candidates(opts PickOptions) []account.Account {
 	defer p.mu.Unlock()
 	usable := make([]account.Account, 0, len(all))
 	for _, acc := range all {
+		if opts.Route == "codex" && acc.OAuthClientID == account.BPSOAuthClientID {
+			continue
+		}
 		if opts.AccountID != "" && acc.ID != opts.AccountID {
 			continue
 		}
@@ -236,6 +244,9 @@ func (p *Pool) Refresh(ctx context.Context, id string, force bool) (*account.Acc
 	if !force && acc.AccessToken != "" && acc.AccountID != "" && !acc.ExpiringWithin(refreshAhead) {
 		return &acc, nil
 	}
+	if acc.OAuthClientID == account.BPSOAuthClientID && acc.RefreshFailures > 0 {
+		return nil, errors.New("BPS refresh previously failed; authorize BPS again to avoid replaying a rotated refresh grant")
+	}
 	if strings.TrimSpace(acc.RefreshToken) == "" {
 		if acc.AccessToken != "" && acc.AccountID != "" && !acc.Expired() {
 			return &acc, nil
@@ -251,6 +262,7 @@ func (p *Pool) Refresh(ctx context.Context, id string, force bool) (*account.Acc
 		stored.LastError = acc.LastError
 		stored.RefreshFailures = acc.RefreshFailures
 		if err == nil {
+			stored.OAuthClientID = acc.OAuthClientID
 			stored.AccessToken, stored.RefreshToken, stored.IDToken = acc.AccessToken, acc.RefreshToken, acc.IDToken
 			stored.ExpiresAt, stored.LastRefresh = acc.ExpiresAt, acc.LastRefresh
 			stored.Email, stored.AccountID, stored.UserID, stored.PlanType = acc.Email, acc.AccountID, acc.UserID, acc.PlanType

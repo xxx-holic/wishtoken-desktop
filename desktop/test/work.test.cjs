@@ -69,6 +69,8 @@ test('candy verdict reads the conclusion, not any mention of 21; uncertain answe
  assert.equal(candyVerdict('最终答案：\\boxed{21}').verdict,'pass');
  assert.equal(candyVerdict('我不确定，可能 21 也可能 29。').verdict,'review');
  assert.equal(candyVerdict('答案为 21','modified question').verdict,'review');
+ assert.equal(candyVerdict('最少取出 \\(21\\) 颗。').verdict,'pass');
+ assert.equal(candyVerdict('答案是21颗。若不允许选择形状，则答案是29颗。').verdict,'review');
 });
 test('candy history preserves wrong answers, does not create an HTML preview, and retries the same question',async t=>{
  const home=fs.mkdtempSync(path.join(os.tmpdir(),'wishtoken-candy-')); const seen=[];

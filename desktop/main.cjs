@@ -14,6 +14,7 @@ const { Pelican, DEFAULT_PROMPT } = require('./lib/pelican.cjs');
 const { CANDY_PROMPT } = require('./lib/benchmarks.cjs');
 const { Work } = require('./lib/work.cjs');
 const { externalLink } = require('./lib/links.cjs');
+const { loginAction, loginURL } = require('./lib/login.cjs');
 
 const dataHome = process.env.GPTBRIDGE_DESKTOP_HOME || path.join(os.homedir(), '.gptbridge-desktop');
 const primaryHome = mainProfile.mainHome();
@@ -89,6 +90,15 @@ async function handle(method, input) {
       return result.canceled ? null : importPaths(result.filePaths);
     }
     case 'importPaths': return importPaths(input);
+    case 'loginStart': return loginAction(service, 'start', input);
+    case 'loginStatus': return loginAction(service, 'status', input);
+    case 'loginCancel': return loginAction(service, 'cancel', input);
+    case 'loginOpen': {
+      const pending = await loginAction(service, 'status', input);
+      if (!pending.active || pending.done) throw new Error('登录会话已结束，请重新发起授权');
+      await shell.openExternal(loginURL(pending));
+      return { opened: true };
+    }
     case 'importText':
       if (typeof input !== 'string' || Buffer.byteLength(input) > 16 * 1024 * 1024) throw new Error('JSON 内容为空或过大');
       try { JSON.parse(input); } catch { throw new Error('JSON 格式不正确，请检查括号、引号和逗号。'); }

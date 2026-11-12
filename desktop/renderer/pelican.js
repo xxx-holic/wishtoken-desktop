@@ -3,7 +3,7 @@ const pelicanState = { selected: new Set(), batches: [], batch: '', loading: fal
 const pelicanStatus = { running: '生成中', queued: '排队中', completed: '已完成', failed: '失败', cancelling: '取消中', cancelled: '已取消', interrupted: '已中断' };
 function pelicanAccounts() {
   const accounts = state.data?.accounts || [];
-  $('pelican-accounts').innerHTML = accounts.map(a => `<label class="pelican-account"><input type="checkbox" value="${esc(a.id)}" ${pelicanState.selected.has(a.id) ? 'checked' : ''} ${a.disabled || (a.expired && !a.has_refresh_token) ? 'disabled' : ''}><span>${esc(label(a))}<small>${esc(planLabel(a))}${a.usage?.primary ? ` · 剩余 ${Math.max(0, 100 - a.usage.primary.used_percent)}%` : ' · 额度未查询'}</small></span></label>`).join('') || '<p>请先导入 Team 子号。</p>';
+  $('pelican-accounts').innerHTML = accounts.map(a => `<label class="pelican-account"><input type="checkbox" value="${esc(a.id)}" ${pelicanState.selected.has(a.id) ? 'checked' : ''} ${a.disabled || (a.expired && !a.has_refresh_token) ? 'disabled' : ''}><span>${esc(label(a))}<small>${esc(grantLabel(a))} · ${esc(planLabel(a))}${a.usage?.primary ? ` · 剩余 ${Math.max(0, 100 - a.usage.primary.used_percent)}%` : ' · 额度未查询'}</small></span></label>`).join('') || '<p>请先导入 Team 子号。</p>';
 }
 async function loadPelican() {
   if (pelicanState.loading) return;

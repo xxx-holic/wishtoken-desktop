@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/api"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
 	"github.com/xxx-holic/wishtoken-desktop/internal/jwt"
@@ -140,6 +141,10 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.Channel = channel
+	if channel == "codex" && a.OAuthClientID == account.BPSOAuthClientID {
+		writeError(w, r, 400, "oauth_channel_mismatch", "invalid_request_error", "此记录是 BPS 授权，请选择同账号的 Codex 授权记录用于原生通道")
+		return
+	}
 	o.Speed = req.Speed
 	if channel == "prism" {
 		o.PrismURL = req.PrismURL

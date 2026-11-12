@@ -7,6 +7,7 @@ const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const accountByID = id => state.data?.accounts.find(account => account.id === id);
 const label = account => account?.name || account?.email || account?.account_id || '未命名账号';
 const planLabel = account => /business|team/i.test(account.plan_type || '') ? 'Business · Team' : (account.plan_type || 'Team').replaceAll('_', ' ');
+const grantLabel = account => account?.oauth_client_id === 'app_fnr0pYvVwwFDocDumLG3H2Bp' ? 'BPS 授权' : !account?.oauth_client_id || account.oauth_client_id === 'app_EMoamEEZ73f0CkXaXp7hrann' ? 'Codex 授权' : '其他授权';
 function date(value) { if (!value || value.startsWith('0001-')) return '—'; return new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }); }
 function ago(value) { if (!value || value.startsWith('0001-')) return '尚未查询'; const mins = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return mins < 1 ? '刚刚更新' : mins < 60 ? `${mins} 分钟前更新` : `${Math.floor(mins / 60)} 小时前更新`; }
 function remaining(value) { const secs = Math.max(0, Math.ceil((new Date(value) - Date.now()) / 1000)); return secs > 3600 ? `${Math.ceil(secs / 3600)} 小时` : secs > 60 ? `${Math.ceil(secs / 60)} 分钟` : `${secs} 秒`; }
@@ -88,7 +89,7 @@ function renderAccounts() {
   const left = a => Math.min(...[a.usage?.primary, a.usage?.secondary].filter(Boolean).map(w => 100 - w.used_percent), 100);
   accounts.sort((a,b) => $('account-sort').value === 'name' ? label(a).localeCompare(label(b)) : $('account-sort').value === 'quota' ? (a.usage ? 0 : 1) - (b.usage ? 0 : 1) || left(b) - left(a) : Number(b.id === data.codex.active_account_id) - Number(a.id === data.codex.active_account_id));
   $('account-list').classList.toggle('compact', $('compact-view').checked);
-  const options = data.accounts.map(a => `<option value="${esc(a.id)}" ${a.disabled ? 'disabled' : ''}>${esc(label(a))}${a.id === data.codex.active_account_id ? ' · 当前' : ''}</option>`).join('');
+  const options = data.accounts.map(a => `<option value="${esc(a.id)}" ${a.disabled ? 'disabled' : ''}>${esc(label(a))} · ${esc(grantLabel(a))}${a.id === data.codex.active_account_id ? ' · 当前' : ''}</option>`).join('');
   if ($('quick-account').innerHTML !== options) $('quick-account').innerHTML = options;
   $('quick-account').value = state.selected;
   if (!accounts.length) {
@@ -104,7 +105,7 @@ function renderAccounts() {
     return `<article class="account-card${selected ? ' selected' : ''}" data-id="${esc(account.id)}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="选择 ${esc(label(account))}">
       <div class="card-top"><div class="avatar">${esc(label(account).slice(0, 1).toUpperCase())}</div><div class="card-identity"><div class="card-name" title="${esc(label(account))}">${esc(label(account))}</div><div class="card-email" title="${esc(account.account_id)}">${esc(account.name ? account.email : `Team ${account.account_id}`)}</div></div>${selected ? `<span class="card-selected">${icon('check')}</span>` : ''}</div>
       <div class="card-tags"><span class="tag team">${esc(planLabel(account))}</span>${current ? '<span class="tag active">当前启动账号</span>' : ''}<span class="tag">${account.has_refresh_token ? '支持自动续期' : '到期后重新导入'}</span>${account.usage?.limit_reached ? '<span class="tag">额度已用尽</span>' : ''}${quality?.model_mismatches ? `<span class="tag quality-bad" title="最近 ${quality.model_mismatches} 次响应报告的模型名不同，请查看运行记录">模型标识差异</span>` : ''}</div>
-      <div class="card-health">${statusHTML(account)}<span>${esc(ago(account.usage?.updated_at))}</span></div>
+      <div class="card-health">${statusHTML(account)}<span>${esc(grantLabel(account))} · ${esc(ago(account.usage?.updated_at))}</span></div>
       <div class="quotas">${quotaHTML(account.usage?.primary, '5 小时额度')}${!account.usage || account.usage.secondary ? quotaHTML(account.usage?.secondary, secondaryLabel) : ''}</div>
       ${warning ? `<div class="card-warning">额度查询失败：${esc(warning)}${account.usage ? '；仍显示上次快照' : ''}</div>` : ''}
       ${account.last_error && account.status !== 'cooldown' && !account.last_error.startsWith('rate limited (') ? `<div class="card-warning">${esc(account.last_error)}</div>` : ''}
@@ -221,6 +222,7 @@ function switchPage(page) {
   document.querySelectorAll('[data-page]').forEach(button => { const current = button.dataset.page === page; button.classList.toggle('active', current); if (current) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
   $('page-title').textContent = { accounts: 'Team 账号', history: '最近项目', logs: '运行记录', settings: '设置', pelican: '测智对比' }[page];
   $('refresh-all').hidden = page !== 'accounts'; $('import-files').hidden = page !== 'accounts';
+  $('login-account').hidden = page !== 'accounts';
   if (page === 'history') renderHistory();
   if (page === 'logs') void loadLogs();
   if (page === 'pelican') void loadPelican();
@@ -252,7 +254,7 @@ async function importResult(result) {
 async function importFiles() { await action('import', async () => { const result = await api.importFiles(); if (!result) return; closeModal(); await importResult(result); }); }
 function pasteDialog() {
   if (state.busy.has('import')) return;
-  modal(`<div class="import-dialog"><h2>导入 Codex 账号</h2><p>直接粘贴账号 JSON、auth.json 或账号数组，也可以选择本地 JSON 文件。</p>
+  modal(`<div class="import-dialog"><h2>导入账号</h2><p>直接粘贴账号 JSON、auth.json 或账号数组，也可以选择本地 JSON 文件。BPS 与 Codex 授权分别保存。</p>
     <div class="import-tabs" role="tablist" aria-label="导入方式"><button id="import-paste-tab" role="tab" aria-selected="true" aria-controls="import-paste-panel">粘贴 JSON</button><button id="import-file-tab" role="tab" aria-selected="false" aria-controls="import-file-panel" tabindex="-1">从文件导入</button></div>
     <section id="import-paste-panel" role="tabpanel" aria-labelledby="import-paste-tab">
       <details class="import-example"><summary>支持的格式与示例</summary><p>支持单个对象、账号数组、auth.json 和 Sub2API 导出。access_token 或 refresh_token 至少提供一项；也可包含 id_token、account_id、email、expired 和 last_refresh。</p><pre>[
@@ -305,6 +307,52 @@ function editDialog(id) {
     $('confirm-remove').onclick = () => action('edit', async () => { await api.account({ id, action: 'delete' }); closeModal(); state.usageErrors.delete(id); await refresh(true); toast('账号已移除'); });
   };
 }
+let loginGeneration = 0, activeLogin = null;
+function loginDialog() {
+  modal('<h2>授权登录</h2><p>BPS 和 Codex 是同一账号的两种独立授权。浏览器中完成登录，客户端不收集密码或验证码。</p><div class="modal-actions"><button class="secondary" id="login-codex">Codex 原生授权</button><button class="primary" id="login-bps">BPS 授权</button></div><p id="login-progress" role="status"></p><div id="login-device" hidden><label class="field-label" for="login-code">在授权页输入此设备码</label><input id="login-code" class="full" readonly><p>核对浏览器中显示的账号后完成授权；完成后自动导入。</p></div><div class="modal-actions"><button class="secondary" id="cancel-login">取消</button><button class="primary" id="open-login" hidden>打开授权页</button></div>');
+  const generation = ++loginGeneration;
+  $('cancel-login').onclick = closeModal;
+  for (const type of ['codex', 'bps']) $('login-' + type).onclick = async () => {
+    $('login-codex').disabled = $('login-bps').disabled = true;
+    $('login-progress').textContent = '正在创建授权…';
+    try {
+      const start = await api.loginStart(type);
+      if (generation !== loginGeneration) { await api.loginCancel(start.session); return; }
+      activeLogin = start.session;
+      $('login-code').value = start.user_code || '';
+      $('login-device').hidden = !start.user_code;
+      $('open-login').hidden = false;
+      $('open-login').onclick = () => action('login-open', () => api.loginOpen(start.session));
+      $('login-progress').textContent = `等待 ${type === 'bps' ? 'BPS' : 'Codex'} 浏览器授权…`;
+      await api.loginOpen(start.session).catch(error => toast(error.message, 'error'));
+      const poll = async () => {
+        if (generation !== loginGeneration) return;
+        try {
+          const status = await api.loginStatus(start.session);
+          if (generation !== loginGeneration) return;
+          if (status.done) {
+            activeLogin = null;
+            if (status.error) throw new Error(status.error);
+            if (!status.account_id) throw new Error('授权完成但账号尚未保存');
+            state.selected = status.account_id; closeModal(); await refresh(true); renderAccounts();
+            toast(`${type === 'bps' ? 'BPS' : 'Codex'} 授权已保存，请在对应通道测试`); return;
+          }
+          setTimeout(poll, 1500);
+        } catch (error) {
+          if (generation !== loginGeneration) return;
+          $('login-progress').textContent = error.message;
+          $('open-login').hidden = true;
+          $('login-codex').disabled = $('login-bps').disabled = false;
+        }
+      };
+      void poll();
+    } catch (error) {
+      if (generation !== loginGeneration) return;
+      $('login-progress').textContent = error.message;
+      $('login-codex').disabled = $('login-bps').disabled = false;
+    }
+  };
+}
 function launchOptions() {
   const options = { account_id: state.selected, app_mode: $('app-mode').value, channel: $('channel').value, speed: $('speed').value, directory: $('directory').value.trim(), target: $('launch-target').value, model: $('model').value, effort: state.effort, context_window: Number($('context-window').value), compact_limit: Number($('compact-limit').value) };
   if ($('channel').value === 'prism') { options.prism_url = $('prism-url').value.trim(); options.prism_key = $('prism-key').value; }
@@ -355,6 +403,12 @@ function updateContextLabel() { document.querySelector('.advanced summary span')
 
 document.querySelector('nav').addEventListener('click', event => { const button = event.target.closest('[data-page]'); if (button) switchPage(button.dataset.page); });
 $('import-files').onclick = pasteDialog;
+$('login-account').onclick = loginDialog;
+$('modal').addEventListener('close', () => {
+  loginGeneration++;
+  const pending = activeLogin; activeLogin = null;
+  if (pending) void api.loginCancel(pending).catch(error => toast(error.message, 'error'));
+});
 $('paste-json').onclick = pasteDialog;
 $('modal').addEventListener('close', () => { const input = $('json-text'); if (input) input.value = ''; });
 $('refresh-all').onclick = () => action('refresh-all', async () => { const ids = state.data?.accounts.filter(account => !account.disabled).map(account => account.id) || []; await refreshMany(ids); const failed = ids.filter(id => state.usageErrors.has(id)).length; toast(failed ? `${failed} 个账号查询失败，详情见账号卡片` : '全部额度已更新', failed ? 'error' : 'success'); });
