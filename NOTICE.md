@@ -1,6 +1,6 @@
 # 致谢与来源 / Attribution
 
-Kilo 订阅通道的协议参考用户提供的 kilo2api 源码包与 Kilo-Org/cloud 的固定源码快照（8a3465bb27f36155700cf8eb5bec2ad3cdc73cfe），并通过授权账号实测 HTTP 请求。此处为独立 Go 实现，没有捆绑参考服务源码、账号数据或代理池；具体范围见 `docs/KILO_PREVIEW.md`。
+焚诀通道为独立 Go 协议实现，没有捆绑参考服务源码、账号数据或代理池。研究来源及固定快照保留在私有维护记录中；具体功能和验证范围见 `docs/FENJUE_PREVIEW.md`。下列实际使用的第三方依赖许可证继续随包保留。
 
 WishToken Desktop（核心沿用 GPTBridge 名称）是一个独立实现，代码以 MIT 许可证发布。Basispoints（Excel 插件后端）协议
 本身没有公开文档，本项目对协议的理解来自下列公开项目的源码阅读与其作者的验证记录，

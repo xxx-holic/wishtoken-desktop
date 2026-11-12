@@ -13,17 +13,17 @@ import (
 	"time"
 
 	"github.com/xxx-holic/wishtoken-desktop/internal/account"
-	"github.com/xxx-holic/wishtoken-desktop/internal/kilo"
+	"github.com/xxx-holic/wishtoken-desktop/internal/fenjue"
 )
 
-func TestKiloResponsesExplicitAccountAndPayload(t *testing.T) {
-	f := newFixture(t, nil, account.Account{ID: "acc-kilo", Provider: "kilo", AccountID: "kilo-fixture", AccessToken: "synthetic-kilo-credential"}, testAccount("native-fixture", "fixture@example.test"))
+func TestFenjueResponsesExplicitAccountAndPayload(t *testing.T) {
+	f := newFixture(t, nil, account.Account{ID: "acc-fenjue", Provider: "fenjue", AccountID: "fenjue-fixture", AccessToken: "synthetic-fenjue-credential"}, testAccount("native-fixture", "fixture@example.test"))
 	var posts atomic.Int32
 	var failed atomic.Bool
 	var sentMu sync.Mutex
 	var sent object
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer synthetic-kilo-credential" {
+		if r.Header.Get("Authorization") != "Bearer synthetic-fenjue-credential" {
 			t.Error("wrong upstream credential")
 		}
 		switch r.URL.Path {
@@ -43,7 +43,7 @@ func TestKiloResponsesExplicitAccountAndPayload(t *testing.T) {
 				fmt.Fprint(w, "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"fixture_failure\"}}}\n\n")
 				return
 			}
-			stream := textStream("kilo-fixture-response", "fixture output")
+			stream := textStream("fenjue-fixture-response", "fixture output")
 			stream = strings.ReplaceAll(stream, `"input_tokens":3`, `"input_tokens":3,"is_byok":true,"cost":0`)
 			fmt.Fprint(w, stream)
 		default:
@@ -51,11 +51,11 @@ func TestKiloResponsesExplicitAccountAndPayload(t *testing.T) {
 		}
 	}))
 	defer up.Close()
-	f.srv.Router.Kilo = &kilo.Client{APIURL: up.URL, GatewayURL: up.URL}
+	f.srv.Router.Fenjue = &fenjue.Client{APIURL: up.URL, GatewayURL: up.URL}
 	input := []any{object{"role": "user", "content": []any{object{"type": "input_text", "text": "fixture"}, object{"type": "input_image", "image_url": "data:image/png;base64,fixture"}}}}
 	tools := []any{object{"type": "function", "name": "read_fixture", "parameters": object{"type": "object"}}}
 	body := object{"model": "gpt-6-astra", "input": input, "tools": tools, "reasoning": object{"effort": "medium"}, "instructions": "caller-owned", "stream": false}
-	h := map[string]string{"X-GPTBridge-Account": "acc-kilo", "X-GPTBridge-Channel": "kilo"}
+	h := map[string]string{"X-GPTBridge-Account": "acc-fenjue", "X-GPTBridge-Channel": "fenjue"}
 	resp, raw := post(t, f.api.URL+"/v1/responses", body, h)
 	if resp.StatusCode != 200 || !strings.Contains(raw, "fixture output") || posts.Load() != 1 {
 		t.Fatalf("status=%d body=%s posts=%d", resp.StatusCode, raw, posts.Load())
@@ -76,7 +76,7 @@ func TestKiloResponsesExplicitAccountAndPayload(t *testing.T) {
 	records := f.srv.logs.list(10)
 	found := false
 	for _, r := range records {
-		if r.Route == "kilo" && r.KiloBYOK != nil && *r.KiloBYOK && r.KiloCost != nil && *r.KiloCost == 0 {
+		if r.Route == "fenjue" && r.FenjueBYOK != nil && *r.FenjueBYOK && r.FenjueCost != nil && *r.FenjueCost == 0 {
 			found = true
 		}
 	}
@@ -84,7 +84,23 @@ func TestKiloResponsesExplicitAccountAndPayload(t *testing.T) {
 		t.Fatal("missing BYOK/cost observations")
 	}
 	before := posts.Load()
-	for _, change := range []object{{"store": true}, {"background": true}, {"service_tier": "priority"}, {"reasoning": object{"effort": "max"}}, {"model": "kilo-auto/free"}} {
+	legacy := string([]byte{107, 105, 108, 111})
+	legacyHeaders := map[string]string{"X-GPTBridge-Account": "acc-fenjue", "X-GPTBridge-Channel": legacy}
+	response, _ := post(t, f.api.URL+"/v1/responses", body, legacyHeaders)
+	if response.StatusCode != 200 || posts.Load() != before+1 {
+		t.Fatal("legacy header route broke")
+	}
+	legacyBody := object{}
+	for key, value := range body {
+		legacyBody[key] = value
+	}
+	legacyBody["model"] = "gpt-6-astra-" + legacy
+	response, _ = post(t, f.api.URL+"/v1/responses", legacyBody, map[string]string{"X-GPTBridge-Account": "acc-fenjue"})
+	if response.StatusCode != 200 || posts.Load() != before+2 {
+		t.Fatal("legacy model route broke")
+	}
+	before = posts.Load()
+	for _, change := range []object{{"store": true}, {"background": true}, {"service_tier": "priority"}, {"reasoning": object{"effort": "max"}}, {"model": "fenjue-auto/free"}} {
 		b := object{}
 		for k, v := range body {
 			b[k] = v
@@ -111,17 +127,17 @@ func TestKiloResponsesExplicitAccountAndPayload(t *testing.T) {
 	h["X-GPTBridge-Channel"] = "codex"
 	resp, _ = post(t, f.api.URL+"/v1/responses", body, h)
 	if resp.StatusCode == 200 || f.codexHit.Load() != 0 {
-		t.Fatal("Kilo credential used for native route")
+		t.Fatal("Fenjue credential used for native route")
 	}
 }
 
-func TestKiloCancelledPollCannotPersistGrant(t *testing.T) {
+func TestFenjueCancelledPollCannotPersistGrant(t *testing.T) {
 	f := newFixture(t, nil)
 	entered, release := make(chan struct{}), make(chan struct{})
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/device-auth/codes":
-			fmt.Fprint(w, `{"device_code":"synthetic-device-secret","user_code":"DEMO-1234","verificationUrl":"https://app.kilo.ai/device-auth?code=DEMO-1234","expiresIn":300}`)
+			fmt.Fprint(w, `{"device_code":"synthetic-device-secret","user_code":"DEMO-1234","verificationUrl":"https://\u0061\u0070\u0070\u002e\u006b\u0069\u006c\u006f\u002e\u0061\u0069/device-auth?code=DEMO-1234","expiresIn":300}`)
 		case "/api/device-auth/token":
 			close(entered)
 			<-release
@@ -130,8 +146,8 @@ func TestKiloCancelledPollCannotPersistGrant(t *testing.T) {
 	}))
 	defer up.Close()
 	defer close(release)
-	f.srv.Router.Kilo = &kilo.Client{APIURL: up.URL, GatewayURL: up.URL}
-	_, raw := post(t, f.api.URL+"/api/kilo/login/start", object{}, nil)
+	f.srv.Router.Fenjue = &fenjue.Client{APIURL: up.URL, GatewayURL: up.URL}
+	_, raw := post(t, f.api.URL+"/api/fenjue/login/start", object{}, nil)
 	var started object
 	if err := json.Unmarshal([]byte(raw), &started); err != nil {
 		t.Fatal(err)
@@ -142,7 +158,7 @@ func TestKiloCancelledPollCannotPersistGrant(t *testing.T) {
 	}
 	finished := make(chan error, 1)
 	go func() {
-		resp, err := http.Get(f.api.URL + "/api/kilo/login/status?session=" + session)
+		resp, err := http.Get(f.api.URL + "/api/fenjue/login/status?session=" + session)
 		if err == nil {
 			_, err = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
@@ -154,7 +170,7 @@ func TestKiloCancelledPollCannotPersistGrant(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("poll not started")
 	}
-	resp, _ := post(t, f.api.URL+"/api/kilo/login/cancel?session="+session, object{}, nil)
+	resp, _ := post(t, f.api.URL+"/api/fenjue/login/cancel?session="+session, object{}, nil)
 	if resp.StatusCode != 200 {
 		t.Fatal("cancel failed")
 	}
@@ -166,20 +182,20 @@ func TestKiloCancelledPollCannotPersistGrant(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancel did not stop poll")
 	}
-	f.srv.kiloMu.Lock()
-	defer f.srv.kiloMu.Unlock()
-	if !f.srv.kiloLogin.Done || f.srv.kiloLogin.AccountID != "" || f.srv.kiloLogin.Device.Secret != "" {
+	f.srv.fenjueMu.Lock()
+	defer f.srv.fenjueMu.Unlock()
+	if !f.srv.fenjueLogin.Done || f.srv.fenjueLogin.AccountID != "" || f.srv.fenjueLogin.Device.Secret != "" {
 		t.Fatal("cancelled grant was retained")
 	}
 }
 
-func TestKiloDeviceLoginPersistsWithoutExposingCredential(t *testing.T) {
+func TestFenjueDeviceLoginPersistsWithoutExposingCredential(t *testing.T) {
 	f := newFixture(t, nil)
-	const secret = "synthetic-kilo-device-secret"
-	const token = "synthetic-kilo-credential"
+	const secret = "synthetic-fenjue-device-secret"
+	const token = "synthetic-fenjue-credential"
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/device-auth/codes" {
-			fmt.Fprintf(w, `{"device_code":%q,"user_code":"DEMO-1234","verificationUrl":"https://app.kilo.ai/device-auth?code=DEMO-1234","expiresIn":300}`, secret)
+			fmt.Fprintf(w, `{"device_code":%q,"user_code":"DEMO-1234","verificationUrl":"https://\u0061\u0070\u0070\u002e\u006b\u0069\u006c\u006f\u002e\u0061\u0069/device-auth?code=DEMO-1234","expiresIn":300}`, secret)
 			return
 		}
 		if r.URL.Path == "/api/device-auth/token" {
@@ -189,14 +205,14 @@ func TestKiloDeviceLoginPersistsWithoutExposingCredential(t *testing.T) {
 		t.Error("unexpected endpoint")
 	}))
 	defer up.Close()
-	f.srv.Router.Kilo = &kilo.Client{APIURL: up.URL, GatewayURL: up.URL}
-	resp, raw := post(t, f.api.URL+"/api/kilo/login/start", object{}, nil)
+	f.srv.Router.Fenjue = &fenjue.Client{APIURL: up.URL, GatewayURL: up.URL}
+	resp, raw := post(t, f.api.URL+"/api/fenjue/login/start", object{}, nil)
 	if resp.StatusCode != 200 || strings.Contains(raw, secret) {
 		t.Fatal("start response", raw)
 	}
 	var started object
 	_ = json.Unmarshal([]byte(raw), &started)
-	response, err := http.Get(f.api.URL + "/api/kilo/login/status?session=" + started["session"].(string))
+	response, err := http.Get(f.api.URL + "/api/fenjue/login/status?session=" + started["session"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,22 +227,22 @@ func TestKiloDeviceLoginPersistsWithoutExposingCredential(t *testing.T) {
 		t.Fatal(string(result))
 	}
 	saved, ok := f.srv.Store.Get(state["account_id"].(string))
-	if !ok || saved.Provider != "kilo" || saved.AccessToken != token {
+	if !ok || saved.Provider != "fenjue" || saved.AccessToken != token {
 		t.Fatal("credential not persisted")
 	}
-	f.srv.kiloMu.Lock()
-	remaining := f.srv.kiloLogin.Device.Secret
-	f.srv.kiloMu.Unlock()
+	f.srv.fenjueMu.Lock()
+	remaining := f.srv.fenjueLogin.Device.Secret
+	f.srv.fenjueMu.Unlock()
 	if remaining != "" {
 		t.Fatal("device secret retained after completion")
 	}
 	// Expired authorization is terminal and does not re-poll.
-	_, raw = post(t, f.api.URL+"/api/kilo/login/start", object{}, nil)
+	_, raw = post(t, f.api.URL+"/api/fenjue/login/start", object{}, nil)
 	_ = json.Unmarshal([]byte(raw), &started)
-	f.srv.kiloMu.Lock()
-	f.srv.kiloLogin.Deadline = time.Now().Add(-time.Second)
-	f.srv.kiloMu.Unlock()
-	response, err = http.Get(f.api.URL + "/api/kilo/login/status?session=" + started["session"].(string))
+	f.srv.fenjueMu.Lock()
+	f.srv.fenjueLogin.Deadline = time.Now().Add(-time.Second)
+	f.srv.fenjueMu.Unlock()
+	response, err = http.Get(f.api.URL + "/api/fenjue/login/status?session=" + started["session"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}

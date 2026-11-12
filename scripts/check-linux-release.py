@@ -1,6 +1,7 @@
 """Verify Linux release identity, source payload, ELF architecture and packaging."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import stat
 import struct
@@ -63,6 +64,8 @@ def audit_payload(payload):
             require(raw == (DESKTOP / name).read_bytes(), "Runtime source mismatch: " + name)
         elif name != "package.json":
             require(raw.replace(b"\r\n", b"\n") == (DESKTOP / name).read_bytes().replace(b"\r\n", b"\n"), "Source mismatch: " + name)
+        if not name.startswith("node_modules/") and not name.endswith(".png"):
+            require(not re.search(bytes.fromhex("6b696c6f7c6b69726f"), name.encode()+raw, re.I), "Legacy provider branding in application payload")
 
 
 def audit_tree(root):

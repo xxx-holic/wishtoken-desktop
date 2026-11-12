@@ -97,7 +97,7 @@ func TestIsolatedConfig(t *testing.T) {
 // by the Codex build the app launches. Codex 0.163 rejects "function" while
 // parsing model_catalog_json, which blocks Codex from starting at all.
 func TestChannelCatalogsParseInInstalledCodex(t *testing.T) {
-	for _, channel := range []string{"bps", "codex", "work", "kilo"} {
+	for _, channel := range []string{"bps", "codex", "work", "fenjue"} {
 		var manifest struct {
 			Models []struct {
 				Slug                     string   `json:"slug"`

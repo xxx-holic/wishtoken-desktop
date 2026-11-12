@@ -7,7 +7,7 @@ const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const accountByID = id => state.data?.accounts.find(account => account.id === id);
 const label = account => account?.name || account?.email || account?.account_id || '未命名账号';
 const planLabel = account => /business|team/i.test(account.plan_type || '') ? 'Business · Team' : (account.plan_type || 'Team').replaceAll('_', ' ');
-const grantLabel = account => account?.provider === 'kilo' ? 'Kilo 授权' : account?.oauth_client_id === 'app_fnr0pYvVwwFDocDumLG3H2Bp' ? 'BPS 授权' : !account?.oauth_client_id || account.oauth_client_id === 'app_EMoamEEZ73f0CkXaXp7hrann' ? 'Codex 授权' : '其他授权';
+const grantLabel = account => account?.provider === 'fenjue' ? '焚诀授权' : account?.oauth_client_id === 'app_fnr0pYvVwwFDocDumLG3H2Bp' ? 'BPS 授权' : !account?.oauth_client_id || account.oauth_client_id === 'app_EMoamEEZ73f0CkXaXp7hrann' ? 'Codex 授权' : '其他授权';
 function date(value) { if (!value || value.startsWith('0001-')) return '—'; return new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }); }
 function ago(value) { if (!value || value.startsWith('0001-')) return '尚未查询'; const mins = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return mins < 1 ? '刚刚更新' : mins < 60 ? `${mins} 分钟前更新` : `${Math.floor(mins / 60)} 小时前更新`; }
 function remaining(value) { const secs = Math.max(0, Math.ceil((new Date(value) - Date.now()) / 1000)); return secs > 3600 ? `${Math.ceil(secs / 3600)} 小时` : secs > 60 ? `${Math.ceil(secs / 60)} 分钟` : `${secs} 秒`; }
@@ -134,7 +134,7 @@ function renderHistory() {
     return `<article class="history-row"><span class="icon-box">${icon('folder')}</span><div class="history-info"><strong>${esc(basename)}</strong><p title="${esc(record.directory)}">${record.target === 'app' ? record.app_mode === 'main' ? '主应用 · 原有项目与会话' : '独立实例 · 单独工作空间' : esc(record.directory)}</p><div class="history-meta"><span>${esc(account ? label(account) : '账号已移除')}</span><span>${channelLabel(record.channel)} · ${esc(record.model)} · ${esc(record.effort)}</span><span>${date(record.last_used)}</span></div></div><div class="history-actions"><button class="secondary" data-history="${esc(record.id)}" data-resume="false" ${disabled}>${record.target === 'app' ? '打开 App' : '新会话'}</button>${record.target === 'app' ? '' : `<button class="primary" data-history="${esc(record.id)}" data-resume="true" ${disabled}>继续会话${icon('arrow')}</button>`}</div></article>`;
   }).join('') : empty('还没有最近项目', '选择账号和项目目录，首次启动后会保存在这里。');
 }
-const channelLabel = channel => ({codex:'原生 Codex',work:'ChatGPT Work',bps:'BPS',kilo:'Kilo 订阅'}[channel] || 'BPS');
+const channelLabel = channel => ({codex:'原生 Codex',work:'ChatGPT Work',bps:'BPS',fenjue:'焚诀订阅'}[channel] || 'BPS');
 const speedLabel = speed => speed === 'fast' ? '快速' : '标准';
 function accountSpeed(id) { return $('channel').value !== 'codex' ? 'standard' : state.data?.preferences.account_speeds?.[id] || 'standard'; }
 function renderSpeed() {
@@ -145,7 +145,7 @@ function renderSpeed() {
 async function saveSpeed(id, speed) { state.data.preferences = await api.preferences({account_speed:{id,speed}}); renderAccounts(); }
 function channelModels(channel, select, preferred) {
   const data = state.data;
-  const models = channel === 'kilo' ? data.models.kilo_catalog || [] : channel === 'work' ? data.models.work_catalog : channel === 'prism' ? data.models.prism_catalog : channel === 'codex' ? data.models.native_catalog : data.models.catalog.filter(model => data.models.bps_models.includes(model.id));
+  const models = channel === 'fenjue' ? data.models.fenjue_catalog || [] : channel === 'work' ? data.models.work_catalog : channel === 'prism' ? data.models.prism_catalog : channel === 'codex' ? data.models.native_catalog : data.models.catalog.filter(model => data.models.bps_models.includes(model.id));
   select.innerHTML = (models || []).map(model => `<option value="${esc(model.id)}">${esc(model.display_name)}</option>`).join('');
   select.value = preferred || '';
   if (!select.value) select.selectedIndex = 0;
@@ -155,8 +155,8 @@ function launchChannel(channel, preferred) {
   channelModels($('channel').value, $('model'), preferred);
   $('route-label').textContent = `${channelLabel(channel)} 通道`;
   const work=channel==='work', prism=channel==='prism';
-  $('kilo-setup').hidden = channel !== 'kilo';
-  if (channel === 'kilo') $('app-mode').value = 'isolated';
+  $('fenjue-setup').hidden = channel !== 'fenjue';
+  if (channel === 'fenjue') $('app-mode').value = 'isolated';
   $('work-setup').hidden=!work; $('work-hint').hidden=!work; $('prism-setup').hidden=!prism;
   document.querySelectorAll('[data-effort]').forEach(b=>{ const effort=b.dataset.effort; b.disabled=(effort==='max'&&!work&&!prism)||(effort==='ultra'&&!prism); });
   if(prism){
@@ -164,7 +164,7 @@ function launchChannel(channel, preferred) {
     $('app-mode').value='isolated'; $('app-mode').disabled=true;
     $('context-window').value=272000; $('compact-limit').value=200000; updateContextLabel();
   }else{
-    $('app-mode').disabled=channel==='kilo';
+    $('app-mode').disabled=channel==='fenjue';
     if(state.effort==='max'||state.effort==='ultra') setEffort(work?'max':'xhigh');
     if(work&&!['low','medium','high','xhigh','max'].includes(state.effort)) setEffort('medium');
     if(work){ $('context-window').value=32000; $('compact-limit').value=24000; updateContextLabel(); }
@@ -232,8 +232,8 @@ function switchPage(page) {
   if (page === 'settings') void action('work-load',loadWork);
 }
 async function refreshUsage(id, silent = false) {
-  if (state.data?.accounts.find(a => a.id === id)?.provider === 'kilo') {
-    if (!silent) { switchPage('settings'); await loadKilo(id); }
+  if (state.data?.accounts.find(a => a.id === id)?.provider === 'fenjue') {
+    if (!silent) { switchPage('settings'); await loadFenjue(id); }
     return;
   }
   return action(`usage-${id}`, async () => {
@@ -407,7 +407,7 @@ async function loadLogs() {
     $('logs-list').innerHTML = records.length ? summary + `<table class="log-table"><thead><tr><th>时间</th><th>模型 / 推理</th><th>通道 / 速度</th><th>观测</th><th>结果 / 用量</th><th>耗时</th></tr></thead><tbody>${records.map(record => {
       const details = [record.request_turn_state_length ? `req-state ${record.request_turn_state_length}` : 'req-state 未回传', record.turn_state_length ? `resp-state ${record.turn_state_length}` : '', record.safety_buffering ? `safety ${record.safety_buffering}` : '', record.safety_faster_model ? `→ ${record.safety_faster_model}` : ''].filter(Boolean).join(' · ');
       const quality = (record.model_mismatch ? '<span class="tag quality-bad">模型名不匹配</span>' : record.quality === 'model_match' ? '<span class="tag quality-ok">模型名一致</span>' : '<span class="muted">未知</span>') + (details ? `<br><small>${esc(details)}</small>` : '');
-      const usage = record.stream_status === 'completed' ? `<br><small>输入 ${record.input_tokens ?? '—'} · 缓存 ${record.cached_input_tokens ?? 0}<br>输出 ${record.output_tokens ?? '—'} · 推理 ${record.reasoning_tokens ?? 0}${record.route==='kilo' ? `<br>Kilo BYOK ${record.kilo_byok === true ? '是' : record.kilo_byok === false ? '否' : '未报告'} · 费用 ${record.kilo_cost == null ? '未报告' : esc(record.kilo_cost)}` : ''}</small>` : '';
+      const usage = record.stream_status === 'completed' ? `<br><small>输入 ${record.input_tokens ?? '—'} · 缓存 ${record.cached_input_tokens ?? 0}<br>输出 ${record.output_tokens ?? '—'} · 推理 ${record.reasoning_tokens ?? 0}${record.route==='fenjue' ? `<br>焚诀 BYOK ${record.fenjue_byok === true ? '是' : record.fenjue_byok === false ? '否' : '未报告'} · 费用 ${record.fenjue_cost == null ? '未报告' : esc(record.fenjue_cost)}` : ''}</small>` : '';
       return `<tr><td>${date(record.time)}</td><td><strong>${esc(record.model)}</strong><br><small>返回 ${esc(record.response_model || '未报告')}</small><br><span class="muted">${esc(record.effort)}</span></td><td><code>${esc(record.route)} ${esc(record.transport || '')}</code><br><small>请求 ${esc(record.service_tier || 'standard')} → 返回 ${esc(record.response_service_tier || '未报告')}</small></td><td>${quality}</td><td class="${record.status >= 400 || record.stream_status === 'failed' ? 'danger-text' : ''}" title="${esc(record.error)}">${record.status} ${esc(record.stream_status || '连接已建立')}${record.error ? `<br><small>${esc(record.error.slice(0, 180))}</small>` : ''}${usage}</td><td>${(record.duration_ms / 1000).toFixed(1)} s</td></tr>`;
     }).join('')}</tbody></table>` : empty('暂无请求记录', '启动 Codex 或测试连接后，实际请求会显示在这里。');
   } catch (error) { toast(error.message, 'error'); }

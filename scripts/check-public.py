@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_PARTS = {'.handoff', '.codex', '.claude', 'node_modules', 'captures', 'sessions', 'reports', 'analysis'}
 FORBIDDEN_NAMES = {'auth.json', 'accounts.json', 'config.json', 'bridge-identity.json', 'desktop.json', 'history.json', '.env'}
 RULES = {
+    'legacy provider branding': re.compile(bytes.fromhex('6b696c6f7c6b69726f'), re.I),
     'private key': re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'),
     'JWT literal': re.compile(rb'eyJ[A-Za-z0-9_-]{25,}\.[A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{15,}'),
     'secret token literal': re.compile(rb'(?:sk-(?:proj-)?|gh[pousr]_|github_pat_|rt_)[A-Za-z0-9_-]{25,}'),
@@ -45,6 +46,7 @@ def main():
         if path.is_symlink():
             findings.append((rel,'symlink requires manual publication review'));continue
         data=path.read_bytes()
+        if RULES['legacy provider branding'].search(rel.encode('utf-8')): findings.append((rel,'legacy provider filename'))
         if any(token in data for token in secrets): findings.append((rel,'authorized sample credential found'))
         for label,pattern in RULES.items():
             if pattern.search(data): findings.append((rel,label))

@@ -18,7 +18,7 @@ WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子
 - 子号账密 + 2FA 导入：每行 `邮箱----密码----2FA种子`，默认纯协议完成原生或 BPS 授权；多工作区明确选择，逐项显示结果，浏览器自动化仅作显式备用。
 - 选择 BPS、原生 Codex 或 ChatGPT Work 通道，默认 BPS；会话固定账号与通道，失败不会静默改用另一通道。Work 为本地预览功能，需单独绑定网页登录。
 - BPS 传输可显式选择 HTTP 或实验 WebSocket；运行记录区分输入、缓存、输出和推理 tokens。验证范围见 [BPS 传输与对照测试](docs/BPS_TRANSPORT.md)。
-- Kilo 订阅通道：独立设备授权、ChatGPT 订阅绑定检查、Responses API、工具与图片输入；可启动隔离 Codex App / CLI，记录 BYOK 与费用字段。实测及边界见 [Kilo 预览说明](docs/KILO_PREVIEW.md)。
+- 焚诀订阅通道：独立设备授权、ChatGPT 订阅绑定检查、Responses API、工具与图片输入；可启动隔离 Codex App / CLI，记录 BYOK 与费用字段。实测及边界见 [焚诀预览说明](docs/FENJUE_PREVIEW.md)。
 - 一键切换并启动：默认切换主 Codex App，沿用原有项目、会话和应用数据；无需项目目录。首次接管备份配置，设置中可恢复；独立实例可手动选择。CLI 按账号和项目隔离。
 - 原生通道可保存每个账号的标准／快速偏好。运行记录分别展示请求与上游返回的服务等级；请求快速不等于上游已分配快速。
 - 测智对比：鹈鹕动画与糖果题，同提示词、模型和推理档位，支持取消、重试、历史、隔离预览及原文导出。糖果题按结论 21 判定本题结果，答案不进入请求。
@@ -28,7 +28,7 @@ WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子
 
 ## 下载和开始使用
 
-当前预览版本为 `0.9.0-kilo-preview.1`，各平台下载及验证状态见 [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases)。新增 Kilo 通道已实测原始糖果题、鹈鹕动画、图片、函数工具及真实 Codex CLI 文件操作；尚无“同账号原生答错、Kilo 答对”的降智恢复对照，见 [Kilo 说明](docs/KILO_PREVIEW.md)。BPS 独立授权和子号协议导入见 [BPS 说明](docs/BPS_TRANSPORT.md)；Work 登录、API 和测试步骤见 [Work 预览说明](docs/WORK_PREVIEW.md)。
+当前预览版本为 `0.9.0-fenjue-preview.1`，各平台下载及验证状态见 [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases)。新增焚诀通道已实测原始糖果题、鹈鹕动画、图片、函数工具及真实 Codex CLI 文件操作；尚无“同账号原生答错、焚诀答对”的降智恢复对照，见 [焚诀说明](docs/FENJUE_PREVIEW.md)。BPS 独立授权和子号协议导入见 [BPS 说明](docs/BPS_TRANSPORT.md)；Work 登录、API 和测试步骤见 [Work 预览说明](docs/WORK_PREVIEW.md)。
 
 在 [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases) 下载：
 
@@ -52,8 +52,8 @@ Linux 安装和系统终端要求见 [Linux 说明](docs/LINUX.md)。本项目�
 
 **账号现货 · 订阅代充 · API 中转，一站配齐。**
 
-- **[WishToken 账号商城](https://wishtoken.team/)**：ChatGPT、Claude、Gemini、Grok、Cursor、Kiro、Muse 等账号、会员、席位与积分套餐；自营 Team5X / GPT Free，提供 ChatGPT、Claude、Grok 正价代充。
-- **[多模型 API 中转](https://wishtoapp.com/)**：GPT、Claude / Kiro、DeepSeek、Kimi、MiniMax，按量计费、分组自选。[查看当前渠道与倍率](https://sub2api.wishtoapp.com/guide/channels?utm_source=wishtoken)。
+- **[WishToken 账号商城](https://wishtoken.team/)**：ChatGPT、Claude、Gemini、Grok、Cursor、Muse 等账号、会员、席位与积分套餐；自营 Team5X / GPT Free，提供 ChatGPT、Claude、Grok 正价代充。
+- **[多模型 API 中转](https://wishtoapp.com/)**：GPT、Claude、DeepSeek、Kimi、MiniMax，按量计费、分组自选。[查看当前渠道与倍率](https://sub2api.wishtoapp.com/guide/channels?utm_source=wishtoken)。
 - **[链动小铺](https://wzyp.cn/shop/6YHGJOPN)**：更多账号、订阅与配套服务。价格、库存、交付及质保规则以所购商品页面为准。
 - **批发与合作**：批量采购、免费卡密铺货、自动补池、号商入驻。[托管发车内测](https://wishtoken.team/shop/dispatch)可查看母号、排期与产出，支持 TXT / ZIP 取货；新接入联系 [@wishtoken_team](https://t.me/wishtoken_team)，以页面开放状态为准。分销码：`r5tcjnab`。
 

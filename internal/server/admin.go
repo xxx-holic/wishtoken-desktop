@@ -17,6 +17,7 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/api"
 	"github.com/xxx-holic/wishtoken-desktop/internal/basispoints"
+	"github.com/xxx-holic/wishtoken-desktop/internal/channelname"
 	"github.com/xxx-holic/wishtoken-desktop/internal/codexcfg"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
 	"github.com/xxx-holic/wishtoken-desktop/internal/httpx"
@@ -112,10 +113,10 @@ func (l *recordLog) list(limit int) []router.Record {
 }
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api")
+	path := channelname.AdminPath(strings.TrimPrefix(r.URL.Path, "/api"))
 	switch {
-	case strings.HasPrefix(path, "/kilo/"):
-		s.adminKilo(w, r, path)
+	case strings.HasPrefix(path, "/fenjue/"):
+		s.adminFenjue(w, r, path)
 	case path == "/shutdown" && r.Method == http.MethodPost:
 		api.WriteJSON(w, http.StatusOK, object{"ok": true})
 		s.stopMu.Lock()
@@ -172,7 +173,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, object{"ok": true, "backup": backup})
 	case path == "/models" && r.Method == http.MethodGet:
 		cfg := s.Config()
-		api.WriteJSON(w, http.StatusOK, object{"catalog": basispoints.Catalog, "native_catalog": localcodex.NativeModels(), "work_catalog": localcodex.WorkModels(), "prism_catalog": localcodex.PrismModels(), "kilo_catalog": localcodex.KiloModels(), "bps_models": cfg.BPSModels, "efforts": basispoints.Efforts, "work_efforts": localcodex.WorkEfforts, "prism_efforts": localcodex.PrismEfforts})
+		api.WriteJSON(w, http.StatusOK, object{"catalog": basispoints.Catalog, "native_catalog": localcodex.NativeModels(), "work_catalog": localcodex.WorkModels(), "prism_catalog": localcodex.PrismModels(), "fenjue_catalog": localcodex.FenjueModels(), "bps_models": cfg.BPSModels, "efforts": basispoints.Efforts, "work_efforts": localcodex.WorkEfforts, "prism_efforts": localcodex.PrismEfforts})
 	default:
 		writeError(w, r, http.StatusNotFound, "not_found", "invalid_request_error", "unknown management endpoint")
 	}
@@ -779,7 +780,7 @@ func (s *Server) adminTest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	start := time.Now()
 	headers := http.Header{}
-	if req.Route == "work" || req.Route == "kilo" {
+	if req.Route == "work" || req.Route == "fenjue" {
 		headers.Set("X-GPTBridge-Channel", req.Route)
 	}
 	if req.AccountID != "" {

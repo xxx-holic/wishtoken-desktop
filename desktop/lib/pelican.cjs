@@ -6,6 +6,7 @@ const http = require('node:http');
 const { atomicJSON } = require('./service.cjs');
 const { requireID, cleanChannel, safeError } = require('./policy.cjs');
 const { workModelAllowed, workEffortAllowed } = require('./work-protocol.cjs');
+const { normalizeHistory } = require('./channel-name.cjs');
 const { PELICAN_PROMPT: DEFAULT_PROMPT, CANDY_PROMPT, candyVerdict } = require('./benchmarks.cjs');
 const uuid = /^[0-9a-f-]{36}$/;
 const active = batch => batch && ['running', 'cancelling'].includes(batch.status);
@@ -26,6 +27,7 @@ class Pelican {
     try { this.batches = JSON.parse(fs.readFileSync(this.file, 'utf8')); if (!Array.isArray(this.batches)) throw new Error('Invalid history'); }
     catch (e) { if (e.code !== 'ENOENT') throw new Error('测智历史无法读取，请检查 pelican/history.json'); this.batches = []; }
     for (const b of this.batches) {
+      normalizeHistory(b);
       b.channel ??= 'bps';
       b.benchmark ??= 'pelican';
       if (active(b)) { b.status = 'interrupted'; for (const i of b.items) if (['queued', 'running'].includes(i.status)) i.status = 'interrupted'; }
@@ -61,7 +63,7 @@ class Pelican {
     if (!prompt || Buffer.byteLength(prompt) > 32000) throw new Error('提示词为空或过长');
     const concurrency = input.concurrency ?? 2;
     const channel = cleanChannel(input.channel);
-    if (chosen.some(a => (a.provider === 'kilo') !== (channel === 'kilo'))) throw new Error('Kilo 测试请选择独立 Kilo 账号，其他通道请选择 ChatGPT 账号');
+    if (chosen.some(a => (a.provider === 'fenjue') !== (channel === 'fenjue'))) throw new Error('焚诀 测试请选择独立 焚诀 账号，其他通道请选择 ChatGPT 账号');
     if (channel === 'work' && (!workModelAllowed(input.model) || !workEffortAllowed(input.effort) || concurrency !== 1)) throw new Error('Work 测试请选择受支持的 Work 模型与推理档位，同时测试数须为 1');
     if (channel !== 'work' && input.effort === 'max') throw new Error('仅 Work 通道支持 max 推理档位');
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 5) throw new Error('同时测试数应为 1–5');

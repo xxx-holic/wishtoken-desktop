@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xxx-holic/wishtoken-desktop/internal/channelname"
 	"github.com/xxx-holic/wishtoken-desktop/internal/jwt"
 )
 
@@ -83,12 +84,12 @@ type Stats struct {
 
 // Identity returns the key used to detect duplicates.
 func (a *Account) Identity() string {
-	if a.Provider == "kilo" {
+	if a.Provider == "fenjue" {
 		if a.AccountID != "" {
-			return "kilo:" + a.AccountID
+			return "fenjue:" + a.AccountID
 		}
 		sum := sha256.Sum256([]byte(a.AccessToken))
-		return "kilo-key:" + hex.EncodeToString(sum[:16])
+		return "fenjue-key:" + hex.EncodeToString(sum[:16])
 	}
 	// Office and Codex issue independent grants for the same member/workspace.
 	// Keep their credentials separate while retaining legacy Codex identities.
@@ -170,8 +171,10 @@ func (a *Account) ExpiringWithin(d time.Duration) bool {
 
 // FillFromTokens completes missing identity fields from the JWT claims.
 func (a *Account) FillFromTokens() {
-	if a.Provider == "kilo" {
-		// Kilo credentials must never be interpreted as a ChatGPT OAuth grant.
+	a.Provider = channelname.Normalize(a.Provider)
+	a.Source = channelname.Source(a.Source)
+	if a.Provider == "fenjue" {
+		// Fenjue credentials must never be interpreted as a ChatGPT OAuth grant.
 		if claims, err := jwt.Decode(a.AccessToken); err == nil {
 			if a.AccountID == "" {
 				a.AccountID, _ = claims.Raw["sub"].(string)

@@ -1,4 +1,4 @@
-package kilo
+package fenjue
 
 import (
 	"context"
@@ -25,7 +25,7 @@ func TestSubscriptionPreflightAndNoReplay(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("Authorization") != "Bearer synthetic-kilo-credential" {
+				if r.Header.Get("Authorization") != "Bearer synthetic-fenjue-credential" {
 					t.Error("missing independent credential")
 				}
 				switch r.URL.Path {
@@ -39,8 +39,11 @@ func TestSubscriptionPreflightAndNoReplay(t *testing.T) {
 					if string(body) != `{"model":"openai/gpt-6-astra","input":"hi"}` {
 						t.Error("body mutated")
 					}
-					if r.Header.Get("X-KILOCODE-MACHINEID") == "" || !strings.HasPrefix(r.Header.Get("X-Session-Id"), "ses_") || r.Header.Get("X-Session-Id") == "session-fixture" {
+					if r.Header.Get("\u0058\u002d\u004b\u0049\u004c\u004f\u0043\u004f\u0044\u0045\u002d\u004d\u0041\u0043\u0048\u0049\u004e\u0045\u0049\u0044") == "" || !strings.HasPrefix(r.Header.Get("X-Session-Id"), "ses_") || r.Header.Get("X-Session-Id") == "session-fixture" {
 						t.Error("missing stable request identity")
+					}
+					if r.Header.Get(wireValue("WC1LSUxPQ09ERS1NQUNISU5FSUQ=")) != "9be0fd70455917d2130dc3799b3eae42" {
+						t.Error("machine identity changed after branding")
 					}
 					if tc.code != 200 {
 						w.WriteHeader(tc.code)
@@ -56,7 +59,7 @@ func TestSubscriptionPreflightAndNoReplay(t *testing.T) {
 			}))
 			defer srv.Close()
 			c := Client{APIURL: srv.URL, GatewayURL: srv.URL}
-			resp, err := c.Responses(context.Background(), Credential{Token: "synthetic-kilo-credential", AccountID: "fixture"}, "gpt-6-astra", []byte(`{"model":"openai/gpt-6-astra","input":"hi"}`), "session-fixture")
+			resp, err := c.Responses(context.Background(), Credential{Token: "synthetic-fenjue-credential", AccountID: "fixture"}, "gpt-6-astra", []byte(`{"model":"openai/gpt-6-astra","input":"hi"}`), "session-fixture")
 			if tc.want == 200 {
 				if err != nil {
 					t.Fatal(err)
@@ -85,9 +88,9 @@ func TestDeviceProtocolAndRedirection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/device-auth/codes":
-			fmt.Fprint(w, `{"device_code":"private-device-secret","user_code":"DEMO-1234","verificationUrl":"https://app.kilo.ai/device-auth?code=DEMO-1234","expiresIn":300}`)
+			fmt.Fprint(w, `{"device_code":"private-device-secret","user_code":"DEMO-1234","verificationUrl":"https://\u0061\u0070\u0070\u002e\u006b\u0069\u006c\u006f\u002e\u0061\u0069/device-auth?code=DEMO-1234","expiresIn":300}`)
 		case "/api/device-auth/token":
-			fmt.Fprint(w, `{"status":"approved","token":"synthetic-kilo-credential","userId":"fixture","userEmail":"fixture@example.test"}`)
+			fmt.Fprint(w, `{"status":"approved","token":"synthetic-fenjue-credential","userId":"fixture","userEmail":"fixture@example.test"}`)
 		default:
 			t.Error("unexpected route")
 		}
@@ -108,7 +111,7 @@ func TestDeviceProtocolAndRedirection(t *testing.T) {
 	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, sink.URL, 307) }))
 	defer redirect.Close()
 	c.APIURL = redirect.URL
-	_, err = c.Status(context.Background(), Credential{Token: "synthetic-kilo-credential"})
+	_, err = c.Status(context.Background(), Credential{Token: "synthetic-fenjue-credential"})
 	if err == nil || hits.Load() != 0 {
 		t.Fatal("redirect forwarded credentials")
 	}

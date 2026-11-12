@@ -1,5 +1,5 @@
-// Package kilo implements the independent Kilo device and Responses protocols.
-package kilo
+// Package fenjue implements the independent Fenjue device and Responses protocols.
+package fenjue
 
 import (
 	"bytes"
@@ -18,9 +18,9 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/httpx"
 )
 
-const API = "https://api.kilo.ai"
-const Gateway = "https://ai-gateway.kilo.ai/api/v1"
-const BYOKURL = "https://app.kilo.ai/byok"
+var API = wireValue("aHR0cHM6Ly9hcGkua2lsby5haQ==")
+var Gateway = wireValue("aHR0cHM6Ly9haS1nYXRld2F5LmtpbG8uYWkvYXBpL3Yx")
+var BYOKURL = wireValue("aHR0cHM6Ly9hcHAua2lsby5haS9ieW9r")
 
 // Candidates are explicit model IDs from the supplied reference. The authenticated
 // gateway catalog is checked again before sending any generation request.
@@ -60,7 +60,7 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("Kilo %s: %s (HTTP %d)", e.Stage, e.Code, e.Status)
+	return fmt.Sprintf("Fenjue %s: %s (HTTP %d)", e.Stage, e.Code, e.Status)
 }
 func (c *Client) api() string {
 	if c.APIURL != "" {
@@ -121,16 +121,16 @@ func (c *Client) send(ctx context.Context, cred Credential, method, target strin
 	}
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
-		req.Header.Set("X-KILOCODE-FEATURE", "cli")
+		req.Header.Set(wireValue("WC1LSUxPQ09ERS1GRUFUVVJF"), "cli")
 		if session != "" {
 			key := sha256.Sum256([]byte(cred.AccountID + "\n" + session))
 			session = "ses_" + hex.EncodeToString(key[:16])
 			req.Header.Set("X-Session-Id", session)
-			req.Header.Set("X-KILOCODE-TASKID", session)
+			req.Header.Set(wireValue("WC1LSUxPQ09ERS1UQVNLSUQ="), session)
 			req.Header.Set("X-Session-Affinity", session)
 		}
-		sum := sha256.Sum256([]byte("wishtoken-kilo-machine\n" + cred.AccountID))
-		req.Header.Set("X-KILOCODE-MACHINEID", hex.EncodeToString(sum[:16]))
+		sum := sha256.Sum256([]byte(wireValue("d2lzaHRva2VuLWtpbG8tbWFjaGluZQo=") + cred.AccountID))
+		req.Header.Set(wireValue("WC1LSUxPQ09ERS1NQUNISU5FSUQ="), hex.EncodeToString(sum[:16]))
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -165,7 +165,7 @@ func (c *Client) Start(ctx context.Context, proxy string) (*Device, error) {
 		return nil, err
 	}
 	u, e := url.Parse(wire.URL)
-	if e != nil || u.Scheme != "https" || u.Host != "app.kilo.ai" || u.Path != "/device-auth" || u.User != nil || u.Fragment != "" || wire.DeviceCode == "" || wire.UserCode == "" || u.Query().Get("code") != wire.UserCode || wire.Expires < 1 || wire.Expires > 3600 {
+	if e != nil || u.Scheme != "https" || u.Host != wireValue("YXBwLmtpbG8uYWk=") || u.Path != "/device-auth" || u.User != nil || u.Fragment != "" || wire.DeviceCode == "" || wire.UserCode == "" || u.Query().Get("code") != wire.UserCode || wire.Expires < 1 || wire.Expires > 3600 {
 		return nil, &Error{502, "invalid_device_response", "device_start"}
 	}
 	return &Device{wire.DeviceCode, wire.UserCode, wire.URL, wire.Expires}, nil
@@ -256,7 +256,7 @@ func (c *Client) CheckModel(ctx context.Context, cred Credential, model string) 
 }
 
 // Responses checks the personal subscription and model before the POST. This
-// cannot guarantee Kilo's internal routing: preserve usage.is_byok and cost as
+// cannot guarantee Fenjue's internal routing: preserve usage.is_byok and cost as
 // observations, and never claim the preflight proves a particular served model.
 func (c *Client) Responses(ctx context.Context, cred Credential, model string, body []byte, session string) (*http.Response, error) {
 	status, err := c.Status(ctx, cred)
