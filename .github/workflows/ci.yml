@@ -11,6 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: python3 scripts/check-public.py
+      - run: python3 scripts/test_release_payload.py
   test:
     strategy:
       fail-fast: false
