@@ -10,7 +10,7 @@ Select BPS or native Codex explicitly (BPS by default). Sessions remain pinned t
 
 Account credentials stay in the local data directory. There is no telemetry, embedded account, invitation credential, or automatic upload to WishToken. Optional business and release links open in your browser.
 
-Current source: `0.9.0-kilo-preview.1` (not a GitHub release). Kilo adds separate device authorization, linked ChatGPT subscription checks and an explicit Responses route with tools/images. Original candy (21), animated pelican, PNG reading and actual Codex CLI file operations were observed. A degraded-native / passing-Kilo comparison is still absent. See [Kilo setup and verification](docs/KILO_PREVIEW.md).
+Current preview: `0.9.0-kilo-preview.1`. See [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases) for platform downloads and validation status. Kilo adds separate device authorization, linked ChatGPT subscription checks and an explicit Responses route with tools/images. Original candy (21), animated pelican, PNG reading and actual Codex CLI file operations were observed. A degraded-native / passing-Kilo comparison is still absent. See [Kilo setup and verification](docs/KILO_PREVIEW.md).
 
 Preview.5 adds protocol-first child account import: paste one `email----password----TOTP seed` per line and explicitly choose Codex or BPS authorization. Accounts use separate HTTP sessions, multiple workspaces require a selection, and saved records can be selected immediately. Passwords and seeds are transient and never written to the account store. Browser automation remains an explicit fallback; JSON import is unchanged. See [authorization and verification](docs/BPS_TRANSPORT.md).
 
