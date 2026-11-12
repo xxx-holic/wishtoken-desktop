@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/xxx-holic/wishtoken-desktop/internal/kilo"
 )
 
 //go:embed models.json
@@ -20,12 +22,18 @@ var modelCatalog []byte
 //go:embed native-models.json
 var nativeCatalog []byte
 
+//go:embed work-models.json
+var workCatalog []byte
+
+//go:embed prism-models.json
+var prismCatalog []byte
+
 func Channel(value string) (string, error) {
 	if value == "" {
 		return "bps", nil
 	}
-	if value != "bps" && value != "codex" {
-		return "", fmt.Errorf("请选择 BPS 或原生通道")
+	if value != "bps" && value != "codex" && value != "work" && value != "prism" && value != "kilo" {
+		return "", fmt.Errorf("请选择 BPS、原生、Kilo、Work 或 Prism 通道")
 	}
 	return value, nil
 }
@@ -51,14 +59,141 @@ func NativeModelAllowed(model string) bool {
 	return false
 }
 
+// WorkModels lists the ChatGPT Work models the browser bridge can drive.
+func WorkModels() []map[string]any {
+	var manifest struct {
+		Models []map[string]any `json:"models"`
+	}
+	_ = json.Unmarshal(workCatalog, &manifest)
+	models := []map[string]any{}
+	for _, m := range manifest.Models {
+		models = append(models, map[string]any{"id": m["slug"], "display_name": m["display_name"], "context_window": m["context_window"]})
+	}
+	return models
+}
+
+func WorkModelAllowed(model string) bool {
+	for _, m := range WorkModels() {
+		if m["id"] == model {
+			return true
+		}
+	}
+	return false
+}
+
+func WorkModelName(model string) string {
+	for _, m := range WorkModels() {
+		if m["id"] == model {
+			return fmt.Sprint(m["display_name"])
+		}
+	}
+	return model
+}
+
+// WorkEfforts are the client-facing tiers the Work web UI exposes.
+var WorkEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+func WorkEffortAllowed(effort string) bool {
+	for _, e := range WorkEfforts {
+		if e == effort {
+			return true
+		}
+	}
+	return false
+}
+
+// PrismModels lists the models exposed by a local prism-bridge.
+func PrismModels() []map[string]any {
+	var manifest struct {
+		Models []map[string]any `json:"models"`
+	}
+	_ = json.Unmarshal(prismCatalog, &manifest)
+	models := []map[string]any{}
+	for _, m := range manifest.Models {
+		models = append(models, map[string]any{"id": m["slug"], "display_name": m["display_name"], "context_window": m["context_window"]})
+	}
+	return models
+}
+
+func PrismModelAllowed(model string) bool {
+	for _, m := range PrismModels() {
+		if m["id"] == model {
+			return true
+		}
+	}
+	return false
+}
+
+// prism-bridge maps xhigh to high; omit it rather than silently change tiers.
+var PrismEfforts = []string{"low", "medium", "high", "max", "ultra"}
+
+func PrismEffortAllowed(effort string) bool {
+	for _, e := range PrismEfforts {
+		if e == effort {
+			return true
+		}
+	}
+	return false
+}
+
+// PrismURL validates and normalizes the local prism-bridge origin.
+func PrismURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("请填写本机 prism-bridge 地址")
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Scheme != "http" || (u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && u.Hostname() != "::1") || u.Port() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("Prism 桥地址必须是本机 http://127.0.0.1:端口")
+	}
+	path := strings.TrimRight(u.Path, "/")
+	if path != "" && path != "/v1" {
+		return "", fmt.Errorf("Prism 桥地址路径只能是空或 /v1")
+	}
+	return u.Scheme + "://" + u.Host, nil
+}
+
 // Catalog returns the route-compatible native Codex model manifest.
 func Catalog() []byte { return append([]byte(nil), modelCatalog...) }
 
 func ChannelCatalog(channel string) []byte {
+	if channel == "kilo" {
+		var manifest map[string]any
+		_ = json.Unmarshal(nativeCatalog, &manifest)
+		models := []any{}
+		for _, item := range manifest["models"].([]any) {
+			m := item.(map[string]any)
+			if id, _ := m["slug"].(string); kilo.ModelAllowed(id) {
+				m["default_service_tier"] = "default"
+				models = append(models, m)
+			}
+		}
+		manifest["models"] = models
+		raw, _ := json.Marshal(manifest)
+		return raw
+	}
+	if channel == "work" {
+		return append([]byte(nil), workCatalog...)
+	}
+	if channel == "prism" {
+		return append([]byte(nil), prismCatalog...)
+	}
 	if channel == "codex" {
 		return append([]byte(nil), nativeCatalog...)
 	}
 	return Catalog()
+}
+
+// KiloModels reuses known Codex client metadata, without inventing capabilities
+// for the reference's other candidate IDs. Every request also checks Kilo's catalog.
+func KiloModels() []map[string]any {
+	models := []map[string]any{}
+	for _, m := range NativeModels() {
+		if kilo.ModelAllowed(m["id"].(string)) {
+			models = append(models, m)
+		}
+	}
+	return models
 }
 
 type Options struct {
@@ -73,6 +208,8 @@ type Options struct {
 	Speed         string
 	AccessToken   string
 	AuthAPIURL    string
+	PrismURL      string
+	PrismKey      string
 	ContextWindow int
 	CompactLimit  int
 	Resume        bool
@@ -114,6 +251,9 @@ func Prepare(o Options) (Options, error) {
 		return o, channelErr
 	}
 	o.Channel = channel
+	if channel == "kilo" && (!kilo.ModelAllowed(o.Model) || (o.Speed != "" && o.Speed != "standard")) {
+		return o, fmt.Errorf("Kilo requires a supported model and standard speed")
+	}
 	if o.Speed == "" {
 		o.Speed = "standard"
 	}
@@ -122,6 +262,19 @@ func Prepare(o Options) (Options, error) {
 	}
 	if o.Channel == "bps" && o.Speed != "standard" {
 		return o, fmt.Errorf("BPS 暂不支持快速模式，请选择标准速度或原生通道")
+	}
+	if o.Channel == "work" && (!WorkModelAllowed(o.Model) || !WorkEffortAllowed(o.Effort) || o.Speed != "standard") {
+		return o, fmt.Errorf("Work 请选择受支持的 Work 模型与推理档位，并使用标准速度")
+	}
+	if o.Channel == "prism" {
+		if !PrismModelAllowed(o.Model) || !PrismEffortAllowed(o.Effort) || o.Speed != "standard" {
+			return o, fmt.Errorf("Prism 请选择受支持的模型与推理档位，并使用标准速度")
+		}
+		normalized, err := PrismURL(o.PrismURL)
+		if err != nil {
+			return o, err
+		}
+		o.PrismURL = normalized
 	}
 	u, err := url.Parse(o.BaseURL)
 	if err != nil || u.Scheme != "http" || (u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && u.Hostname() != "::1") {
@@ -132,8 +285,16 @@ func Prepare(o Options) (Options, error) {
 	}
 	switch o.Effort {
 	case "low", "medium", "high", "xhigh":
+	case "max":
+		if o.Channel != "work" && o.Channel != "prism" {
+			return o, fmt.Errorf("仅 Work / Prism 通道支持 max 推理档位")
+		}
+	case "ultra":
+		if o.Channel != "prism" {
+			return o, fmt.Errorf("仅 Prism 通道支持 ultra 推理档位")
+		}
 	default:
-		return o, fmt.Errorf("请选择 low / medium / high / xhigh；BPS 当前不支持 max")
+		return o, fmt.Errorf("请选择 low / medium / high / xhigh / max / ultra（max 仅 Work/Prism，ultra 仅 Prism）")
 	}
 	if o.ContextWindow == 0 {
 		o.ContextWindow = 272000
@@ -167,7 +328,7 @@ func Prepare(o Options) (Options, error) {
 	}
 	// Identity is used only for App account/quota UI. Model requests retain the
 	// bridge env_key and pinned account/channel. Never share refresh-token ownership.
-	identity := o.AccessToken != "" && o.AuthAPIURL != ""
+	identity := o.Channel != "prism" && o.Channel != "kilo" && o.AccessToken != "" && o.AuthAPIURL != ""
 	if identity {
 		auth, _ := json.Marshal(map[string]any{"OPENAI_API_KEY": nil, "personal_access_token": o.AccessToken})
 		if err := os.WriteFile(filepath.Join(o.Home, "auth.json.tmp"), auth, 0600); err != nil {
@@ -186,7 +347,42 @@ func Prepare(o Options) (Options, error) {
 	if o.Speed == "fast" {
 		tier = "priority"
 	}
-	data := fmt.Sprintf(`service_tier = %s
+	var data string
+	if o.Channel == "prism" {
+		prismKey := ""
+		if o.PrismKey != "" {
+			prismKey = "experimental_bearer_token = " + strconv.Quote(o.PrismKey) + "\n"
+		}
+		data = fmt.Sprintf(`model_provider = "prism"
+model = %s
+model_reasoning_effort = %s
+model_catalog_json = %s
+model_context_window = %d
+model_auto_compact_token_limit = %d
+web_search = "disabled"
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+# Codex defaults this on for ChatGPT auth and would send zstd bodies the local
+# bridge does not decode; the bridge accepts identity and gzip only.
+[features]
+enable_request_compression = false
+
+[windows]
+sandbox = "unelevated"
+
+[model_providers.prism]
+name = "Prism Bridge"
+base_url = %s
+%srequires_openai_auth = false
+wire_api = "responses"
+supports_websockets = false
+request_max_retries = 0
+stream_max_retries = 0
+stream_idle_timeout_ms = 600000
+`, strconv.Quote(o.Model), strconv.Quote(o.Effort), strconv.Quote(filepath.Join(o.Home, "models.json")), o.ContextWindow, o.CompactLimit, strconv.Quote(strings.TrimRight(o.PrismURL, "/")+"/v1"), prismKey)
+	} else {
+		data = fmt.Sprintf(`service_tier = %s
 model_provider = "gptbridge"
 model = %s
 model_reasoning_effort = %s
@@ -196,6 +392,11 @@ model_auto_compact_token_limit = %d
 web_search = "disabled"
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
+
+# Codex defaults this on for ChatGPT auth and would send zstd bodies the local
+# bridge does not decode; the bridge accepts identity and gzip only.
+[features]
+enable_request_compression = false
 
 [windows]
 sandbox = "unelevated"
@@ -212,13 +413,15 @@ stream_max_retries = 2
 stream_idle_timeout_ms = 600000
 http_headers = { "X-GPTBridge-Account" = %s, "X-GPTBridge-Channel" = %s }
 `, strconv.Quote(tier), strconv.Quote(o.Model), strconv.Quote(o.Effort), strconv.Quote(filepath.Join(o.Home, "models.json")), o.ContextWindow, o.CompactLimit, strconv.Quote(strings.TrimRight(o.BaseURL, "/")+"/v1"), identity, strconv.Quote(o.AccountID), strconv.Quote(o.Channel))
-	if o.Speed == "fast" {
-		data += "\n[desktop]\ndefault-service-tier = \"priority\"\n"
+		if o.Channel == "work" || o.Channel == "kilo" {
+			data = strings.ReplaceAll(data, "request_max_retries = 2", "request_max_retries = 0")
+			data = strings.ReplaceAll(data, "stream_max_retries = 2", "stream_max_retries = 0")
+		}
+		if o.Speed == "fast" {
+			data += "\n[desktop]\ndefault-service-tier = \"priority\"\n"
+		}
 	}
-	catalog := modelCatalog
-	if o.Channel == "codex" {
-		catalog = nativeCatalog
-	}
+	catalog := ChannelCatalog(o.Channel)
 	if err := os.WriteFile(filepath.Join(o.Home, "models.json"), catalog, 0600); err != nil {
 		return o, err
 	}
@@ -233,9 +436,12 @@ func Environment(o Options) []string {
 	env := []string{}
 	for _, v := range os.Environ() {
 		k, _, _ := strings.Cut(v, "=")
-		if !strings.EqualFold(k, "CODEX_HOME") && !strings.EqualFold(k, "GPTBRIDGE_CODEX_KEY") && !strings.EqualFold(k, "CODEX_AUTHAPI_BASE_URL") {
+		if !strings.EqualFold(k, "CODEX_HOME") && !strings.EqualFold(k, "GPTBRIDGE_CODEX_KEY") && !strings.EqualFold(k, "CODEX_AUTHAPI_BASE_URL") && !strings.EqualFold(k, "PRISM_BRIDGE_KEY") && !strings.HasPrefix(strings.ToUpper(k), "GPTBRIDGE_WORK_") {
 			env = append(env, v)
 		}
+	}
+	if o.Channel == "prism" {
+		return append(env, "CODEX_HOME="+o.Home)
 	}
 	key := o.APIKey
 	if o.AuthAPIURL != "" {

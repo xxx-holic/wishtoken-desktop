@@ -24,7 +24,7 @@ const (
 	// AuthorizeURL is the OAuth authorization endpoint.
 	AuthorizeURL = "https://auth.openai.com/oauth/authorize"
 	// ClientID is the public Codex CLI OAuth client.
-	ClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+	ClientID = account.CodexOAuthClientID
 	// RefreshScope is sent on refresh; it never widens the original grant.
 	RefreshScope = "openid profile email"
 	// LoginScope is requested by the PKCE login flow.
@@ -35,10 +35,11 @@ const (
 
 // Tokens is the result of a token exchange.
 type Tokens struct {
-	AccessToken  string
-	RefreshToken string
-	IDToken      string
-	ExpiresAt    time.Time
+	AccessToken   string
+	RefreshToken  string
+	IDToken       string
+	ExpiresAt     time.Time
+	OAuthClientID string
 }
 
 // HTTPError is a non-200 answer from the token endpoint.
@@ -146,10 +147,11 @@ func exchange(ctx context.Context, client *http.Client, form url.Values, previou
 		payload.ExpiresIn = 3600
 	}
 	t := &Tokens{
-		AccessToken:  payload.AccessToken,
-		RefreshToken: strings.TrimSpace(payload.RefreshToken),
-		IDToken:      strings.TrimSpace(payload.IDToken),
-		ExpiresAt:    time.Now().Add(time.Duration(payload.ExpiresIn) * time.Second),
+		OAuthClientID: form.Get("client_id"),
+		AccessToken:   payload.AccessToken,
+		RefreshToken:  strings.TrimSpace(payload.RefreshToken),
+		IDToken:       strings.TrimSpace(payload.IDToken),
+		ExpiresAt:     time.Now().Add(time.Duration(payload.ExpiresIn) * time.Second),
 	}
 	if exp := jwt.Expiry(t.AccessToken); !exp.IsZero() && exp.Before(t.ExpiresAt) {
 		t.ExpiresAt = exp
@@ -188,6 +190,9 @@ func RefreshWithRetry(ctx context.Context, client *http.Client, refreshToken str
 
 // Apply writes fresh tokens into acc and completes identity fields.
 func Apply(acc *account.Account, t *Tokens) {
+	if t.OAuthClientID != "" {
+		acc.OAuthClientID = t.OAuthClientID
+	}
 	acc.AccessToken = t.AccessToken
 	if t.RefreshToken != "" {
 		acc.RefreshToken = t.RefreshToken
@@ -227,7 +232,18 @@ func RefreshAccount(ctx context.Context, client *http.Client, acc *account.Accou
 	if strings.TrimSpace(acc.RefreshToken) == "" {
 		return errors.New("account has no refresh token")
 	}
-	t, err := RefreshWithRetry(ctx, client, acc.RefreshToken, 3)
+	acc.FillFromTokens()
+	var t *Tokens
+	var err error
+	switch acc.OAuthClientID {
+	case account.BPSOAuthClientID:
+		// Rotating Office refresh grants are never retried automatically.
+		t, err = refreshBPS(ctx, client, acc)
+	case "", ClientID:
+		t, err = RefreshWithRetry(ctx, client, acc.RefreshToken, 3)
+	default:
+		err = errors.New("unsupported OAuth client; reauthorize using Codex or BPS login")
+	}
 	if err != nil {
 		acc.RefreshFailures++
 		acc.LastError = err.Error()

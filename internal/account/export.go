@@ -2,11 +2,15 @@ package account
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
 // ToCPA renders the account in the CLIProxyAPI / codex2api export shape.
 func ToCPA(a Account) map[string]any {
+	if a.Provider == "kilo" {
+		return map[string]any{"type": "kilo", "name": a.Name, "email": a.Email, "access_token": a.AccessToken, "user_id": a.AccountID, "proxy_url": a.ProxyURL}
+	}
 	out := map[string]any{
 		"type":          "codex",
 		"email":         a.Email,
@@ -52,6 +56,11 @@ func ToCodexAuth(a Account) map[string]any {
 func ExportJSON(accounts []Account, format string) ([]byte, error) {
 	switch format {
 	case "codex", "auth.json":
+		for _, a := range accounts {
+			if a.Provider == "kilo" {
+				return nil, fmt.Errorf("Kilo credentials cannot be exported as ChatGPT auth.json")
+			}
+		}
 		if len(accounts) == 1 {
 			return json.MarshalIndent(ToCodexAuth(accounts[0]), "", "  ")
 		}

@@ -4,6 +4,8 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +22,7 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/api"
 	"github.com/xxx-holic/wishtoken-desktop/internal/basispoints"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
+	"github.com/xxx-holic/wishtoken-desktop/internal/kilo"
 	"github.com/xxx-holic/wishtoken-desktop/internal/localcodex"
 	"github.com/xxx-holic/wishtoken-desktop/internal/oauth"
 	"github.com/xxx-holic/wishtoken-desktop/internal/pool"
@@ -50,10 +53,13 @@ type Server struct {
 	stopMu    sync.Mutex
 	stop      context.CancelFunc
 
-	loginMu sync.Mutex
-	login   *oauth.LoginSession
-	loginID string
-	loginAt time.Time
+	loginMu            sync.Mutex
+	login              *oauth.LoginSession
+	loginID            string
+	loginAt            time.Time
+	loginExpectedEmail string
+	kiloMu             sync.Mutex
+	kiloLogin          *kiloLogin
 }
 
 // New wires the bridge components together.
@@ -66,11 +72,13 @@ func New(cfg *config.Config, cfgPath string, store *account.Store) *Server {
 		Pool:        s.Pool,
 		BPS:         &upstream.BPSClient{},
 		Codex:       s.Codex,
+		Kilo:        &kilo.Client{},
 		Replay:      basispoints.NewReplayCache(),
 		Attachments: &basispoints.AttachmentCache{},
 		Observer:    s.logs.add,
 	}
 	s.initCockpit()
+	s.Router.Work = s.workResponses
 	return s
 }
 
@@ -224,6 +232,34 @@ func sameOrigin(origin, host string) bool {
 // helpers
 // ---------------------------------------------------------------------------
 
+// decodeJSONObject accepts one object, plus the double-encoded string form
+// some clients emit after serializing a request twice.
+func decodeJSONObject(raw []byte) (object, []byte, bool) {
+	decode := func(value []byte) (object, bool) {
+		dec := json.NewDecoder(bytes.NewReader(value))
+		dec.UseNumber()
+		var body object
+		if err := dec.Decode(&body); err != nil || body == nil {
+			return nil, false
+		}
+		var extra any
+		if dec.Decode(&extra) != io.EOF {
+			return nil, false
+		}
+		return body, true
+	}
+	if body, ok := decode(raw); ok {
+		return body, raw, true
+	}
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err == nil {
+		if nested, ok := decode([]byte(encoded)); ok {
+			return nested, []byte(encoded), true
+		}
+	}
+	return nil, nil, false
+}
+
 func readJSONBody(w http.ResponseWriter, r *http.Request) (object, []byte, bool) {
 	raw, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
@@ -234,10 +270,35 @@ func readJSONBody(w http.ResponseWriter, r *http.Request) (object, []byte, bool)
 		writeError(w, r, http.StatusRequestEntityTooLarge, "body_too_large", "invalid_request_error", "request body exceeds 64 MiB")
 		return nil, nil, false
 	}
-	var body object
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.UseNumber()
-	if err := dec.Decode(&body); err != nil || body == nil {
+	encoding := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Encoding")))
+	switch encoding {
+	case "", "identity":
+	case "gzip":
+		reader, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_body", "invalid_request_error", "request body is not valid gzip")
+			return nil, nil, false
+		}
+		defer reader.Close()
+		raw, err = io.ReadAll(io.LimitReader(reader, maxBodyBytes+1))
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_body", "invalid_request_error", "could not decompress request body")
+			return nil, nil, false
+		}
+		if len(raw) > maxBodyBytes {
+			writeError(w, r, http.StatusRequestEntityTooLarge, "body_too_large", "invalid_request_error", "request body exceeds 64 MiB")
+			return nil, nil, false
+		}
+	default:
+		writeError(w, r, http.StatusUnsupportedMediaType, "unsupported_encoding", "invalid_request_error", "unsupported request content-encoding: "+encoding)
+		return nil, nil, false
+	}
+	if len(raw) >= 4 && raw[0] == 0x28 && raw[1] == 0xb5 && raw[2] == 0x2f && raw[3] == 0xfd {
+		writeError(w, r, http.StatusUnsupportedMediaType, "unsupported_encoding", "invalid_request_error", "zstd-compressed request bodies are not supported; set [features] enable_request_compression = false")
+		return nil, nil, false
+	}
+	body, raw, ok := decodeJSONObject(raw)
+	if !ok {
 		writeError(w, r, http.StatusBadRequest, "invalid_json", "invalid_request_error", "request body is not a JSON object")
 		return nil, nil, false
 	}
@@ -497,6 +558,18 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config()
 	now := time.Now().Unix()
 	data := make([]any, 0, len(basispoints.Catalog)*2)
+	if r.Header.Get("X-GPTBridge-Channel") == "kilo" {
+		for _, id := range kilo.Models {
+			data = append(data, object{"id": id, "object": "model", "owned_by": "kilo", "availability": "checked before generation"})
+		}
+		api.WriteJSON(w, 200, object{"object": "list", "data": data})
+		return
+	}
+	if cfg.DesktopMode {
+		for _, model := range localcodex.WorkModels() {
+			data = append(data, object{"id": model["id"], "object": "model", "owned_by": "chatgpt-work", "display_name": model["display_name"], "reasoning_efforts": localcodex.WorkEfforts})
+		}
+	}
 	for _, m := range basispoints.Catalog {
 		entry := object{"id": m.ID, "object": "model", "created": now, "owned_by": "openai", "display_name": m.DisplayName,
 			"context_window": m.ContextWindow, "bps_allowed": cfg.BPSModelAllowed(m.ID), "reasoning_efforts": basispoints.Efforts}

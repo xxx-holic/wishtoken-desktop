@@ -35,6 +35,52 @@ type recordLog struct {
 
 func newRecordLog(max int) *recordLog { return &recordLog{max: max} }
 
+func qualitySummary(records []router.Record) object {
+	summary := object{"checked": 0, "model_mismatches": 0, "last_model_mismatch": "", "accounts": object{}}
+	accounts := summary["accounts"].(object)
+	for _, rec := range records {
+		if rec.Quality != "model_match" && rec.Quality != "model_mismatch" {
+			continue
+		}
+		label := rec.Account
+		if label == "" {
+			label = "unknown"
+		}
+		summary["checked"] = summary["checked"].(int) + 1
+		entry, _ := accounts[label].(object)
+		if entry == nil {
+			entry = object{"checked": 0, "model_mismatches": 0, "last_quality": ""}
+			accounts[label] = entry
+		}
+		entry["checked"] = entry["checked"].(int) + 1
+		// Records arrive newest first; keep the newest signal per account.
+		if entry["last_quality"] == "" {
+			entry["last_quality"] = rec.Quality
+			if rec.TurnStateLength > 0 {
+				entry["last_turn_state_length"] = rec.TurnStateLength
+			}
+			if rec.SafetyBuffering != "" {
+				entry["safety_buffering"] = rec.SafetyBuffering
+			}
+			if rec.SafetyFasterModel != "" {
+				entry["safety_faster_model"] = rec.SafetyFasterModel
+			}
+		}
+		if rec.ModelMismatch {
+			stamp := rec.Time.UTC().Format(time.RFC3339)
+			summary["model_mismatches"] = summary["model_mismatches"].(int) + 1
+			entry["model_mismatches"] = entry["model_mismatches"].(int) + 1
+			if entry["last_model_mismatch"] == nil {
+				entry["last_model_mismatch"] = stamp
+			}
+			if summary["last_model_mismatch"] == "" {
+				summary["last_model_mismatch"] = stamp
+			}
+		}
+	}
+	return summary
+}
+
 func (l *recordLog) add(rec router.Record) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -68,6 +114,8 @@ func (l *recordLog) list(limit int) []router.Record {
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api")
 	switch {
+	case strings.HasPrefix(path, "/kilo/"):
+		s.adminKilo(w, r, path)
 	case path == "/shutdown" && r.Method == http.MethodPost:
 		api.WriteJSON(w, http.StatusOK, object{"ok": true})
 		s.stopMu.Lock()
@@ -124,7 +172,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, object{"ok": true, "backup": backup})
 	case path == "/models" && r.Method == http.MethodGet:
 		cfg := s.Config()
-		api.WriteJSON(w, http.StatusOK, object{"catalog": basispoints.Catalog, "native_catalog": localcodex.NativeModels(), "bps_models": cfg.BPSModels, "efforts": basispoints.Efforts})
+		api.WriteJSON(w, http.StatusOK, object{"catalog": basispoints.Catalog, "native_catalog": localcodex.NativeModels(), "work_catalog": localcodex.WorkModels(), "prism_catalog": localcodex.PrismModels(), "kilo_catalog": localcodex.KiloModels(), "bps_models": cfg.BPSModels, "efforts": basispoints.Efforts, "work_efforts": localcodex.WorkEfforts, "prism_efforts": localcodex.PrismEfforts})
 	default:
 		writeError(w, r, http.StatusNotFound, "not_found", "invalid_request_error", "unknown management endpoint")
 	}
@@ -152,10 +200,12 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, object{
 		"version": version.Version, "listen": cfg.Listen, "base_url": s.baseURL(),
 		"desktop_mode":   cfg.DesktopMode,
+		"work_bridge_id": workBridgeID(),
 		"uptime_seconds": int(time.Since(s.startedAt).Seconds()), "accounts": counts,
 		"route_policy": cfg.RoutePolicy, "bps_models": cfg.BPSModels, "native_fallback": cfg.NativeFallback,
 		"proxy_url": httpx.Redact(cfg.ProxyURL), "api_key_set": cfg.APIKey != "", "home": config.Home(),
 		"codex_config": codexcfg.Inspect(codexcfg.ConfigPath()), "default_model": cfg.DefaultModel,
+		"quality": qualitySummary(s.logs.list(200)),
 	})
 }
 
@@ -486,6 +536,7 @@ func (s *Server) settingsView() object {
 	return object{
 		"listen": cfg.Listen, "allow_remote": cfg.AllowRemote, "api_key_set": cfg.APIKey != "",
 		"proxy_url": cfg.ProxyURL, "route_policy": cfg.RoutePolicy, "bps_models": cfg.BPSModels,
+		"bps_transport":   cfg.BPSTransport,
 		"native_fallback": cfg.NativeFallback, "default_model": cfg.DefaultModel, "default_effort": cfg.DefaultEffort,
 		"active_account_id":   cfg.ActiveAccountID,
 		"anthropic_model_map": cfg.AnthropicModelMap, "scheduler": cfg.Scheduler, "auto_refresh": cfg.AutoRefresh,
@@ -552,10 +603,38 @@ func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Channel       string `json:"channel"`
+		ExpectedEmail string `json:"expected_email"`
+		Fresh         bool   `json:"fresh"`
+	}
+	if r.Body != nil {
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 1024))
+		if err := decoder.Decode(&input); err != nil && err != io.EOF {
+			writeError(w, r, 400, "invalid_login", "invalid_request_error", "invalid login request")
+			return
+		}
+	}
+	if input.Channel == "" {
+		input.Channel = "codex"
+	}
+	if input.Channel != "codex" && input.Channel != "bps" {
+		writeError(w, r, 400, "invalid_login_channel", "invalid_request_error", "choose Codex or BPS authorization")
+		return
+	}
+	input.ExpectedEmail = strings.ToLower(strings.TrimSpace(input.ExpectedEmail))
+	if len(input.ExpectedEmail) > 254 || (input.ExpectedEmail != "" && (!strings.Contains(input.ExpectedEmail, "@") || strings.ContainsAny(input.ExpectedEmail, "\r\n\t "))) {
+		writeError(w, r, 400, "invalid_login_identity", "invalid_request_error", "invalid expected login email")
+		return
+	}
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	if s.login != nil && !s.login.Done() {
-		api.WriteJSON(w, http.StatusOK, object{"auth_url": s.login.AuthURL, "session": s.loginID, "reused": true})
+		if input.Fresh || input.Channel != s.login.Channel || input.ExpectedEmail != s.loginExpectedEmail {
+			writeError(w, r, 409, "login_in_progress", "invalid_request_error", "cancel the current login before changing authorization channel")
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, object{"auth_url": s.login.AuthURL, "session": s.loginID, "channel": s.login.Channel, "user_code": s.login.UserCode, "reused": true})
 		return
 	}
 	client, err := httpx.NewClient(httpx.Options{ProxyURL: s.Config().ProxyURL, Timeout: 60 * time.Second})
@@ -564,13 +643,19 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	session, err := oauth.StartLogin(ctx, client)
+	var session *oauth.LoginSession
+	if input.Channel == "bps" {
+		session, err = oauth.StartBPSLogin(ctx, client)
+	} else {
+		session, err = oauth.StartLogin(ctx, client)
+	}
 	if err != nil {
 		cancel()
 		writeError(w, r, http.StatusConflict, "login_unavailable", "server_error", err.Error())
 		return
 	}
 	s.login = session
+	s.loginExpectedEmail = input.ExpectedEmail
 	s.loginID = fmt.Sprint(time.Now().UnixNano())
 	s.loginAt = time.Now()
 	id := s.loginID
@@ -581,8 +666,12 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 			s.setLoginResult(id, "", err)
 			return
 		}
-		acc := account.Account{Source: "browser-login"}
+		acc := account.Account{Source: session.Channel + "-browser-login"}
 		oauth.Apply(&acc, tokens)
+		if err := validateLoginIdentity(acc, input.ExpectedEmail, session.Channel); err != nil {
+			s.setLoginResult(id, "", err)
+			return
+		}
 		up, err := s.Store.Upsert(acc)
 		if err != nil {
 			s.setLoginResult(id, "", err)
@@ -590,7 +679,21 @@ func (s *Server) adminLoginStart(w http.ResponseWriter, r *http.Request) {
 		}
 		s.setLoginResult(id, up.ID, nil)
 	}()
-	api.WriteJSON(w, http.StatusOK, object{"auth_url": session.AuthURL, "session": s.loginID})
+	api.WriteJSON(w, http.StatusOK, object{"auth_url": session.AuthURL, "session": s.loginID, "channel": session.Channel, "user_code": session.UserCode})
+}
+
+func validateLoginIdentity(acc account.Account, email, channel string) error {
+	if email != "" && !strings.EqualFold(strings.TrimSpace(acc.Email), email) {
+		return fmt.Errorf("login identity mismatch; account was not saved")
+	}
+	client := account.CodexOAuthClientID
+	if channel == "bps" {
+		client = account.BPSOAuthClientID
+	}
+	if acc.OAuthClientID != "" && acc.OAuthClientID != client {
+		return fmt.Errorf("login client identity mismatch; account was not saved")
+	}
+	return nil
 }
 
 var loginResults sync.Map // session id -> object
@@ -611,8 +714,13 @@ func (s *Server) adminLoginStatus(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, object{"active": false})
 		return
 	}
-	res := object{"active": !session.Done(), "session": id, "auth_url": session.AuthURL, "done": session.Done()}
+	if expected := r.URL.Query().Get("session"); expected != "" && expected != id {
+		writeError(w, r, 409, "login_session_changed", "invalid_request_error", "login session changed")
+		return
+	}
+	res := object{"active": true, "session": id, "auth_url": session.AuthURL, "channel": session.Channel, "user_code": session.UserCode, "done": false}
 	if v, ok := loginResults.Load(id); ok {
+		res["active"] = false
 		for k, val := range v.(object) {
 			res[k] = val
 		}
@@ -622,6 +730,11 @@ func (s *Server) adminLoginStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminLoginCancel(w http.ResponseWriter, r *http.Request) {
 	s.loginMu.Lock()
+	if expected := r.URL.Query().Get("session"); expected != "" && expected != s.loginID {
+		s.loginMu.Unlock()
+		writeError(w, r, 409, "login_session_changed", "invalid_request_error", "login session changed")
+		return
+	}
 	if s.login != nil {
 		s.login.Close()
 	}
@@ -666,6 +779,9 @@ func (s *Server) adminTest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	start := time.Now()
 	headers := http.Header{}
+	if req.Route == "work" || req.Route == "kilo" {
+		headers.Set("X-GPTBridge-Channel", req.Route)
+	}
 	if req.AccountID != "" {
 		headers.Set("X-GPTBridge-Account", req.AccountID)
 	}

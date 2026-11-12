@@ -52,6 +52,8 @@ type Config struct {
 	RoutePolicy string `json:"route_policy"`
 	// BPSModels lists the models Basispoints may serve. "*" allows all.
 	BPSModels []string `json:"bps_models"`
+	// BPSTransport selects http or the opt-in WebSocket protocol. No fallback.
+	BPSTransport string `json:"bps_transport"`
 	// NativeFallback lets a Basispoints request retry on the native channel
 	// when Basispoints cannot serve it (protocol rejection, model denial).
 	NativeFallback bool `json:"native_fallback"`
@@ -92,6 +94,7 @@ func Default() *Config {
 		Listen:         "127.0.0.1:8791",
 		RoutePolicy:    PolicyBPSOnly,
 		BPSModels:      append([]string(nil), DefaultBPSModels...),
+		BPSTransport:   "http",
 		NativeFallback: false,
 		DefaultModel:   "gpt-6-astra",
 		DefaultEffort:  "xhigh",
@@ -195,6 +198,12 @@ func (c *Config) ApplyEnv() {
 
 // Normalize validates and canonicalizes the configuration.
 func (c *Config) Normalize() error {
+	if c.BPSTransport == "" {
+		c.BPSTransport = "http"
+	}
+	if c.BPSTransport != "http" && c.BPSTransport != "websocket" {
+		return errors.New("bps_transport must be http or websocket")
+	}
 	if c.DesktopMode {
 		c.RoutePolicy, c.NativeFallback, c.WebUI, c.AllowRemote = PolicyBPSOnly, false, false, false
 		if c.APIKey == "" {

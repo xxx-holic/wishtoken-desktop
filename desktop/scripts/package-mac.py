@@ -44,6 +44,9 @@ def build(args):
     backend_bytes = backend.read_bytes()
     if macho_arch(backend_bytes) != CPU[args.arch]:
         raise ValueError(f'Backend does not match {args.arch}')
+    helper = ROOT / 'desktop/login-helper' / f'mac-{args.arch}' / 'wish-login-http'
+    if not helper.is_file() or macho_arch(helper.read_bytes()) != CPU[args.arch]:
+        raise ValueError(f'Build the native mac-{args.arch} protocol helper first; cross-compiling Go alone is insufficient')
     output = ROOT / 'desktop/release' / f'WishToken-Desktop-{version}-mac-{args.arch}.zip'
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix('.zip.building')
@@ -85,12 +88,19 @@ def build(args):
         files = {
             'Resources/app.asar': (args.asar, 0o644),
             'Resources/backend/gptbridge': (backend, 0o755),
+            'Resources/login-helper/wish-login-http': (helper, 0o755),
             'Resources/icon.icns': (ROOT / 'desktop/assets/icon.icns', 0o644),
             'Resources/LICENSE.txt': (ROOT / 'LICENSE', 0o644),
             'Resources/NOTICE.md': (ROOT / 'NOTICE.md', 0o644),
         }
         for name, (file, mode) in files.items():
             target.writestr(zip_info(PREFIX + name, mode), file.read_bytes())
+        notices = helper.parent / 'licenses'
+        if not notices.is_dir():
+            raise ValueError('Missing protocol helper dependency notices')
+        for notice in sorted(notices.iterdir()):
+            if notice.is_file():
+                target.writestr(zip_info(PREFIX + 'Resources/login-helper/licenses/' + notice.name), notice.read_bytes())
         for runtime_name, destination in [('LICENSE', 'ELECTRON-LICENSE.txt'), ('LICENSES.chromium.html', 'LICENSES.chromium.html')]:
             if runtime_name in source.namelist():
                 target.writestr(zip_info(PREFIX + 'Resources/' + destination), source.read(runtime_name))

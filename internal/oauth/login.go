@@ -19,7 +19,10 @@ import (
 // callback port (1455) on localhost because the OAuth client only accepts
 // that exact redirect URI.
 type LoginSession struct {
-	AuthURL string
+	AuthURL  string
+	UserCode string
+	Channel  string
+	cancel   context.CancelFunc
 
 	state    string
 	verifier string
@@ -52,7 +55,7 @@ func StartLogin(ctx context.Context, client *http.Client) (*LoginSession, error)
 	if err != nil {
 		return nil, fmt.Errorf("cannot bind %s (is another login or Codex CLI login running?): %w", redirect.Host, err)
 	}
-	s := &LoginSession{state: state, verifier: verifier, client: client, listener: listener, done: make(chan struct{})}
+	s := &LoginSession{state: state, verifier: verifier, client: client, listener: listener, done: make(chan struct{}), Channel: "codex"}
 	sum := sha256.Sum256([]byte(verifier))
 	params := url.Values{}
 	params.Set("response_type", "code")
@@ -119,6 +122,12 @@ func (s *LoginSession) finish(t *Tokens, err error) {
 	}
 	s.tokens, s.err = t, err
 	close(s.done)
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.server == nil {
+		return
+	}
 	go func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()

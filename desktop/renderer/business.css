@@ -1,0 +1,38 @@
+/* Business links use the existing workspace palette and remain opt-in. */
+.business-page { max-width: 1100px; --business-muted: #52637d; }
+.business-page p { color: var(--business-muted); max-width: 72ch; }
+.business-intro { margin-bottom: 24px; }
+.business-intro h2 { font-size: 23px; margin-bottom: 8px; }
+.business-page h3 { font-size: 15px; margin: 0 0 8px; }
+.business-services { border-top: 1px solid var(--line); }
+.business-row { display: grid; grid-template-columns: minmax(0, 1fr) 190px; align-items: center; gap: 32px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+.business-row p + p { margin-top: 5px; }
+.business-row > button { justify-self: end; }
+.business-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+.business-row .business-actions { flex-direction: column; align-items: flex-end; }
+.business-partners { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 32px; margin: 28px 0; }
+.business-partners .business-actions, .business-community .business-actions { margin-top: 16px; }
+.business-code { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.business-code span { color: var(--business-muted); }
+.business-code strong { font-size: 18px; letter-spacing: .04em; user-select: all; }
+.business-community { border-top: 1px solid var(--line); padding-top: 24px; }
+.business-note { margin-top: 12px; font-size: 12px; }
+html[data-theme=dark] .business-page { --business-muted: #aabbd3; }
+.sidebar { overflow-y: auto; }
+@media (max-height: 800px) {
+  .sidebar { padding-top: 20px; padding-bottom: 20px; }
+  .sidebar .brand { margin-bottom: 22px; }
+  .sidebar .nav-item { padding-top: 10px; padding-bottom: 10px; }
+  .sidebar .community-links { gap: 4px; margin: 14px 0 8px; padding-top: 12px; }
+  .sidebar-note { display: none; }
+  .sidebar footer { margin-top: auto; }
+}
+@media (max-width: 1050px) {
+  .business-row, .business-partners { grid-template-columns: minmax(0, 1fr) 175px; gap: 20px; }
+}
+@media (max-width: 800px) {
+  .business-row, .business-partners { grid-template-columns: 1fr; }
+  .business-row > button { justify-self: start; }
+  .business-row .business-actions { flex-direction: row; align-items: center; }
+  .business-code { align-items: flex-start; }
+}

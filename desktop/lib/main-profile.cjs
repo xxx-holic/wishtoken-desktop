@@ -6,6 +6,10 @@ const { createHash, createHmac, randomUUID } = require('node:crypto');
 
 const FILES = ['config.toml', 'auth.json', 'wishtoken-models.json', 'bridge-identity.json'];
 const MANAGED = ['model_provider', 'model', 'model_reasoning_effort', 'service_tier', 'model_catalog_json', 'model_context_window', 'model_auto_compact_token_limit', 'cli_auth_credentials_store', 'openai_base_url'];
+// Codex compresses ChatGPT-auth request bodies with zstd by default. The local
+// bridge accepts identity and gzip only, so the managed config disables it and
+// restore puts the user's original feature value back.
+const FEATURE_FLAG = 'enable_request_compression';
 function mainHome(env = process.env, userHome = os.homedir()) {
   const value = env.GPTBRIDGE_MAIN_CODEX_HOME || env.CODEX_HOME || path.join(userHome, '.codex');
   if (!path.isAbsolute(value)) throw new Error('主 Codex 数据目录必须是绝对路径');
@@ -65,6 +69,63 @@ function statements(text) {
   if (quote || depth) throw new Error('主应用配置结构不完整，原配置未修改');
   return { lines, statements:result };
 }
+function featurePaths(profile) {
+  const paths = [['features']];
+  if (profile) paths.push(['profiles', profile, 'features']);
+  return paths;
+}
+function sameSection(a, b) { return a.length === b.length && a.every((v, i) => v === b[i]); }
+function withRequestCompressionOff(text, profile) {
+  const doc = statements(text), paths = featurePaths(profile), deleted = new Set();
+  for (const item of doc.statements) {
+    if (item.key === FEATURE_FLAG && paths.some(p => sameSection(p, item.section))) {
+      for (let i = item.start; i < item.end; i++) deleted.add(i);
+    }
+  }
+  const headers = paths.map(p => doc.statements.find(s => s.header && sameSection(p, s.section))).filter(Boolean);
+  const headerStarts = new Set(headers.map(s => s.start));
+  const body = doc.lines.flatMap((line, i) => {
+    if (deleted.has(i)) return [];
+    if (headerStarts.has(i)) return [line, FEATURE_FLAG + ' = false'];
+    return [line];
+  }).join('\n').trim();
+  const rootMissing = !doc.statements.some(s => s.header && sameSection(s.section, ['features']));
+  return (body + (rootMissing ? '\n\n[features]\n' + FEATURE_FLAG + ' = false' : '')).trim() + '\n';
+}
+function restoreRequestCompression(text, original, profile) {
+  const cur = statements(text), src = statements(original), paths = featurePaths(profile);
+  const deleted = new Set(), values = new Map(), append = [];
+  for (const p of paths) {
+    const srcHeader = src.statements.find(s => s.header && sameSection(p, s.section));
+    const srcKey = src.statements.find(s => s.key === FEATURE_FLAG && sameSection(p, s.section));
+    const curHeader = cur.statements.find(s => s.header && sameSection(p, s.section));
+    for (const item of cur.statements) {
+      if (item.key === FEATURE_FLAG && sameSection(p, item.section)) {
+        for (let i = item.start; i < item.end; i++) deleted.add(i);
+      }
+    }
+    if (srcKey) {
+      if (curHeader) values.set(curHeader.start, srcKey.value.trim());
+      else if (p.length === 1) append.push(srcKey.value.trim());
+    } else if (!srcHeader && curHeader) {
+      const next = cur.statements.find(s => s.header && s.start > curHeader.start);
+      const end = next ? next.start : cur.lines.length;
+      let content = false;
+      for (let i = curHeader.start + 1; i < end; i++) {
+        if (deleted.has(i)) continue;
+        const line = cur.lines[i];
+        if (line.trim() && !line.trim().startsWith('#')) { content = true; break; }
+      }
+      if (!content) for (let i = curHeader.start; i < end; i++) deleted.add(i);
+    }
+  }
+  const body = cur.lines.flatMap((line, i) => {
+    if (deleted.has(i)) return [];
+    if (values.has(i)) return [line, FEATURE_FLAG + ' = ' + values.get(i)];
+    return [line];
+  }).join('\n').trim();
+  return (body + (append.length ? '\n\n[features]\n' + FEATURE_FLAG + ' = ' + append[0] : '')).trim() + '\n';
+}
 function mergeConfig(original, prepared, home, key, accountID, channel) {
   const parsed = statements(original), source = statements(prepared);
   const root = parsed.statements.filter(s => s.section.length === 0 && s.key);
@@ -80,7 +141,7 @@ function mergeConfig(original, prepared, home, key, accountID, channel) {
   Object.assign(values, {model_provider:JSON.stringify(provider), model_catalog_json:JSON.stringify(path.join(home,'wishtoken-models.json')), cli_auth_credentials_store:'"file"'});
   if (provider === 'openai') {
     const base = source.statements.find(s => s.section[0] === 'model_providers' && s.section[1] === 'gptbridge' && s.key === 'base_url');
-    if (!base || !/^acc-[A-Za-z0-9-]+$/.test(accountID || '') || !['bps','codex'].includes(channel)) throw new Error('主应用本地通道信息不完整');
+    if (!base || !/^acc-[A-Za-z0-9-]+$/.test(accountID || '') || !['bps','codex','work'].includes(channel)) throw new Error('主应用本地通道信息不完整');
     const url = new URL(scalar(base.value));
     if (url.protocol !== 'http:' || !['127.0.0.1','localhost','[::1]'].includes(url.hostname)) throw new Error('主应用模型入口必须是本地服务');
     const scope = createHmac('sha256',key).update('desktop-api\n'+accountID+'\n'+channel).digest('hex');
@@ -113,7 +174,8 @@ function mergeConfig(original, prepared, home, key, accountID, channel) {
   }
   if (!providerLines.length) throw new Error('缺少本地服务供应商配置');
   const top = Object.entries(values).map(([k,v])=>k+' = '+v).join('\n');
-  return { provider, text: top + '\n\n' + kept + '\n\n' + (provider === 'openai' ? '' : providerLines.join('\n').trim() + '\n') + (desktopFound ? '' : '\n[desktop]\n'+desktopTier+'\n') };
+  const merged = (top + '\n\n' + kept + '\n\n' + (provider === 'openai' ? '' : providerLines.join('\n').trim() + '\n') + (desktopFound ? '' : '\n[desktop]\n'+desktopTier+'\n')).trim();
+  return { provider, text: withRequestCompressionOff(merged, profile) };
 }
 function read(file) { try { return fs.readFileSync(file); } catch(e) { if(e.code==='ENOENT') return null; throw e; } }
 function hash(value) { return value === null ? null : createHash('sha256').update(value).digest('hex'); }
@@ -170,6 +232,87 @@ function apply(plan) {
     atomic(marker,oldMarker);
   }};
 }
+// Restore only the keys and provider table WishToken manages, keeping projects,
+// plugins, MCP servers and other settings changed after the takeover.
+function restoreManagedConfig(original, current) {
+  const src=statements(original), dst=statements(current);
+  const root=src.statements.filter(s=>s.section.length===0 && s.key);
+  const providerEntry=root.find(s=>s.key==='model_provider');
+  const provider=providerEntry?scalar(providerEntry.value):null;
+  if(providerEntry && !provider) throw new Error('备份中的供应商名称无法识别');
+  const managed=new Set([...MANAGED,'forced_login_method','forced_chatgpt_workspace_id']);
+  const values=root.filter(s=>managed.has(s.key)).map(s=>({key:s.key,value:s.value.trim()}));
+  const desktopTier=src.statements.find(s=>s.section.length===1 && s.section[0]==='desktop' && s.key==='default-service-tier');
+  const providerLines=[];
+  if(provider) for(const s of src.statements){ if(s.section[0]==='model_providers' && s.section[1]===provider) providerLines.push(...src.lines.slice(s.start,s.end)); }
+  const profileEntry=dst.statements.find(s=>s.section.length===0 && s.key==='profile');
+  const profile=profileEntry && scalar(profileEntry.value);
+  const originalProfileEntry=src.statements.find(s=>s.section.length===0 && s.key==='profile');
+  const originalProfile=originalProfileEntry && scalar(originalProfileEntry.value);
+  const profileLines=profile && profile===originalProfile ? src.statements.filter(s=>s.section.length===2 && s.section[0]==='profiles' && s.section[1]===profile && s.key && managed.has(s.key)).map(s=>s.body.trim()) : [];
+  const deleted=new Set();
+  for(const s of dst.statements){
+    const top=s.section.length===0;
+    const activeProfile=profile && s.section.length===2 && s.section[0]==='profiles' && s.section[1]===profile;
+    const ownProvider=provider && s.section[0]==='model_providers' && s.section[1]===provider;
+    const tier=s.section.length===1 && s.section[0]==='desktop' && s.key==='default-service-tier';
+    if(((top||activeProfile)&&s.key&&managed.has(s.key)) || ownProvider || tier) for(let i=s.start;i<s.end;i++)deleted.add(i);
+  }
+  const desktopLine=desktopTier?desktopTier.body.trim():null;
+  let desktopFound=false;
+  const kept=dst.lines.flatMap((line,i)=>{
+    if(deleted.has(i)) return [];
+    const profileHeader=dst.statements.find(s=>s.start===i && s.header && s.section.length===2 && s.section[0]==='profiles' && s.section[1]===profile);
+    if(profileHeader && profileLines.length) return [line,...profileLines];
+    const header=dst.statements.find(s=>s.start===i && s.header && s.section.length===1 && s.section[0]==='desktop');
+    if(header){ desktopFound=true; return desktopLine?[line,desktopLine]:[line]; }
+    return [line];
+  }).join('\n').trim();
+  const top=values.map(v=>v.key+' = '+v.value).join('\n');
+  const restored=(top+'\n\n'+kept+'\n\n'+(providerLines.length?providerLines.join('\n').trim()+'\n':'')+(!desktopFound&&desktopLine?'\n[desktop]\n'+desktopLine+'\n':'')).trim()+'\n';
+  return restoreRequestCompression(restored, original, profile);
+}
+
+function restoreManaged(dataHome,home) {
+  home=path.resolve(home);
+  const marker=markerFile(dataHome), raw=read(marker);
+  if(!raw) throw new Error('没有可恢复的 Codex 接管记录');
+  const state=JSON.parse(raw.toString());
+  if(path.resolve(state.home)!==home) throw new Error('备份与当前主应用目录不一致');
+  // With no external edits, restore the original bytes, including table order
+  // and whitespace. Merge only when preserving later user/application edits.
+  if(FILES.every(name=>hash(read(path.join(home,name)))===state.hashes[name])) return restore(dataHome,home);
+  const original=read(path.join(state.backup,'config.toml'));
+  if(!original) throw new Error('接管前的 config.toml 备份不存在');
+  const saved=JSON.parse(fs.readFileSync(path.join(state.backup,'manifest.json'),'utf8'));
+  const current=read(path.join(home,'config.toml'));
+  if(!current) throw new Error('主应用 config.toml 不存在');
+  const merged=restoreManagedConfig(original.toString('utf8'),current.toString('utf8'));
+  const safety=path.join(dataHome,'main-app-backups','restore-'+new Date().toISOString().replace(/[:.]/g,'-')+'-'+randomUUID());
+  fs.mkdirSync(safety,{recursive:true,mode:0o700});
+  const before=Object.fromEntries(FILES.map(name=>[name,read(path.join(home,name))]));
+  for(const name of FILES) if(before[name]!==null) fs.writeFileSync(path.join(safety,name),before[name],{mode:0o600});
+  const written=[];
+  try {
+    atomic(path.join(home,'config.toml'),Buffer.from(merged)); written.push('config.toml');
+    for(const name of ['wishtoken-models.json','bridge-identity.json']) {
+      if(!saved.files?.[name]){ atomic(path.join(home,name),null); written.push(name); }
+      else { const value=read(path.join(state.backup,name)); if(value!==null){ atomic(path.join(home,name),value); written.push(name); } }
+    }
+    // Keep native ChatGPT tokens refreshed by Codex; only restore a past
+    // backup when the current auth.json is WishToken's credential projection.
+    const auth=read(path.join(home,'auth.json'));
+    let projection=false;
+    try { const doc=JSON.parse(auth.toString()); projection=!doc.tokens && ('personal_access_token' in doc || 'OPENAI_API_KEY' in doc); } catch {}
+    if(projection && saved.files?.['auth.json']){ const value=read(path.join(state.backup,'auth.json')); if(value!==null){ atomic(path.join(home,'auth.json'),value); written.push('auth.json'); } }
+    atomic(marker,null);
+  } catch(error) {
+    for(const name of written.reverse()) atomic(path.join(home,name),before[name]);
+    throw error;
+  }
+  return {home,backup:state.backup,safety,restored:true};
+}
+
 function checkRestore(dataHome,home) {
   const marker=markerFile(dataHome), raw=read(marker);
   if(!raw) throw new Error('没有可恢复的主应用接管备份');
@@ -191,4 +334,4 @@ function restore(dataHome,home) {
   }catch(error){for(const name of restored.reverse())atomic(path.join(home,name),current[name]);throw error;}
   return {home,backup:state.backup,restored:true};
 }
-module.exports={mainHome,mergeConfig,prepare,apply,restore,checkRestore,status};
+module.exports={mainHome,mergeConfig,prepare,apply,restore,restoreManaged,restoreManagedConfig,checkRestore,status};

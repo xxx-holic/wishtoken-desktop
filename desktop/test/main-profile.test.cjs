@@ -32,6 +32,7 @@ test('main switch preserves provider, projects, sessions and unrelated TOML',t=>
   assert.match(config,/\[\[misc.entries\]\]\nname = "first"/);
   assert.match(config,/\[model_providers.untouched\]\nname = "retained"/);
   assert.match(config,/experimental_bearer_token = "local-test-key"/);
+  assert.match(config,/\[features\]\nenable_request_compression = false/);
   assert.doesNotMatch(config,/old-profile-model|https:\/\/example.test|default-service-tier = "priority"/);
   assert.match(config,/not a setting/);
   assert.equal(fs.readFileSync(path.join(f.home,'state_5.sqlite'),'utf8'),'unchanged fixture database bytes');
@@ -52,6 +53,45 @@ test('main switch preserves provider, projects, sessions and unrelated TOML',t=>
   assert.equal(fs.existsSync(path.join(f.home,'wishtoken-models.json')),false);
   assert.equal(fs.existsSync(path.join(f.home,'bridge-identity.json')),false);
   assert.equal(profile.status(f.dataHome,f.home).active,false);
+});
+test('managed restore reverts takeover fields without dropping later edits',t=>{
+  const f=fixture(t);
+  profile.apply(profile.prepare(f));
+  fs.appendFileSync(path.join(f.home,'config.toml'),'\n[projects."/new/project"]\ntrust_level = "trusted"\n[mcp_servers.new]\ncommand = "node"\n');
+  fs.writeFileSync(path.join(f.home,'auth.json'),JSON.stringify({tokens:{access_token:'native'},auth_mode:'chatgpt'}));
+  const result=profile.restoreManaged(f.dataHome,f.home);
+  const config=fs.readFileSync(path.join(f.home,'config.toml'),'utf8');
+  assert.equal(result.restored,true);
+  assert.match(config,/^model_provider = "original_provider"$/m);
+  assert.match(config,/^model = "old-model"$/m);
+  assert.match(config,/^service_tier = "priority"$/m);
+  assert.match(config,/\[model_providers\.original_provider\]\nbase_url = "https:\/\/example\.test\/v1"/);
+  assert.match(config,/\[model_providers\.original_provider\.http_headers\]\nCustom = "old"/);
+  assert.match(config,/\[desktop\]\ndefault-service-tier = "priority"/);
+  assert.match(config,/\[projects\."\/new\/project"\]/);
+  assert.match(config,/\[mcp_servers\.new\]/);
+  assert.match(config,/\[profiles\.work\]\nmodel = "old-profile-model"\nmodel_provider = "original_provider"/);
+  assert.doesNotMatch(config,/model_catalog_json|experimental_bearer_token|local-test-key|model_context_window|cli_auth_credentials_store/);
+  assert.doesNotMatch(config,/enable_request_compression|\[features\]/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.home,'auth.json'),'utf8')).tokens.access_token,'native');
+  assert.equal(fs.existsSync(path.join(f.home,'wishtoken-models.json')),false);
+  assert.equal(fs.existsSync(path.join(f.home,'bridge-identity.json')),false);
+  assert.equal(profile.status(f.dataHome,f.home).active,false);
+  assert.ok(fs.existsSync(result.safety));
+});
+test('managed switch disables zstd request compression and restores the prior feature value',t=>{
+  const f=fixture(t);
+  const withFeatures='model_provider = "original_provider"\nmodel = "old-model"\nprofile = "work"\n[features]\nenable_request_compression = true\nother_feature = false\n[profiles.work.features]\nenable_request_compression = true\nprofile_feature = true\n';
+  fs.writeFileSync(path.join(f.home,'config.toml'),withFeatures);
+  profile.apply(profile.prepare(f));
+  let config=fs.readFileSync(path.join(f.home,'config.toml'),'utf8');
+  assert.match(config,/\[features\]\nenable_request_compression = false\nother_feature = false/);
+  assert.match(config,/\[profiles\.work\.features\]\nenable_request_compression = false\nprofile_feature = true/);
+  profile.restoreManaged(f.dataHome,f.home);
+  config=fs.readFileSync(path.join(f.home,'config.toml'),'utf8');
+  assert.equal(config,withFeatures);
+  assert.match(config,/\[features\]\nenable_request_compression = true\nother_feature = false/);
+  assert.match(config,/\[profiles\.work\.features\]\nenable_request_compression = true\nprofile_feature = true/);
 });
 test('external edits prevent stale apply and destructive restore',t=>{
   const f=fixture(t), plan=profile.prepare(f);

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/api"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
 	"github.com/xxx-holic/wishtoken-desktop/internal/jwt"
@@ -108,6 +109,8 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		Channel       string `json:"channel"`
 		Speed         string `json:"speed"`
 		AppMode       string `json:"app_mode"`
+		PrismURL      string `json:"prism_url"`
+		PrismKey      string `json:"prism_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, r, 400, "invalid_json", "invalid_request_error", "invalid launch request")
@@ -138,12 +141,30 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.Channel = channel
+	if (a.Provider == "kilo") != (channel == "kilo") {
+		writeError(w, r, 400, "credential_channel_mismatch", "invalid_request_error", "Kilo requires an independent Kilo credential")
+		return
+	}
+	if channel == "kilo" && req.Target == "app" && req.AppMode != "isolated" {
+		writeError(w, r, 400, "kilo_app_mode", "invalid_request_error", "Kilo uses an isolated Codex instance; choose isolated mode")
+		return
+	}
+	if channel == "codex" && a.OAuthClientID == account.BPSOAuthClientID {
+		writeError(w, r, 400, "oauth_channel_mismatch", "invalid_request_error", "此记录是 BPS 授权，请选择同账号的 Codex 授权记录用于原生通道")
+		return
+	}
 	o.Speed = req.Speed
+	if channel == "prism" {
+		o.PrismURL = req.PrismURL
+		o.PrismKey = req.PrismKey
+		o.AccessToken = ""
+		o.AuthAPIURL = ""
+	}
 	if channel == "codex" && !s.Config().DesktopMode {
 		writeError(w, r, 400, "route_policy", "invalid_request_error", "原生启动需要专用桌面客户端")
 		return
 	}
-	if (channel == "bps" && !s.Config().BPSModelAllowed(o.Model)) || (channel == "codex" && !localcodex.NativeModelAllowed(o.Model)) {
+	if (channel == "bps" && !s.Config().BPSModelAllowed(o.Model)) || (channel == "codex" && !localcodex.NativeModelAllowed(o.Model)) || (channel == "work" && !localcodex.WorkModelAllowed(o.Model)) || (channel == "prism" && !localcodex.PrismModelAllowed(o.Model)) {
 		writeError(w, r, 400, "model_unavailable", "invalid_request_error", "模型不在所选通道列表中")
 		return
 	}
@@ -167,6 +188,10 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.AppMode != "main" && req.AppMode != "isolated" {
 			writeError(w, r, 400, "invalid_app_mode", "invalid_request_error", "App 工作空间无效")
+			return
+		}
+		if channel == "prism" && req.AppMode == "main" {
+			writeError(w, r, 400, "prism_app_mode", "invalid_request_error", "Prism 请使用独立实例，不能接管主 Codex 配置")
 			return
 		}
 	}
@@ -202,7 +227,7 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 	key := sha256.Sum256([]byte(identity))
 	instanceID := hex.EncodeToString(key[:10])
 	o.Home = filepath.Join(config.Home(), "codex-instances", instanceID)
-	if s.Config().DesktopMode && s.Config().CockpitKey != "" && jwt.IsJWT(a.AccessToken) {
+	if channel != "prism" && channel != "kilo" && s.Config().DesktopMode && s.Config().CockpitKey != "" && jwt.IsJWT(a.AccessToken) {
 		o.AccessToken = a.AccessToken
 		o.AuthAPIURL = s.baseURL() + "/cockpit-auth/" + s.Config().CockpitKey
 	}

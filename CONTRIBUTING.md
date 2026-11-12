@@ -41,6 +41,10 @@ npm run smoke
 
 `smoke` 使用合成账号运行真实 Electron/IPC/Go 集成检查，不访问真实账号，也不关闭开发者的主 Codex App。Windows 直接运行；Linux 使用 `dbus-run-session -- xvfb-run -a npm run smoke`。截图只写入忽略的 `build/validation/`。Mac 原生联动应在 Mac 实机验收，不能用交叉编译代替。
 
+协议授权组件使用 Python 3.12。在仓库根目录运行 `python -m pip install -r desktop/protocol/requirements.txt pyinstaller==6.21.0`，再运行 `npm --prefix desktop run login-helper`。辅助程序输出到 `desktop/login-helper/<平台>-<架构>/`；必须在目标平台/架构构建，不能将一个架构的组件装入另一架构的包。日常开发可直接运行 Python worker，发行包必须包含独立可执行组件。
+
+修改登录流程还需运行 `node desktop/test/auto-login-ui-smoke.cjs` 与 `node desktop/test/login-ui-smoke.cjs`。前者使用合成 HTTP 响应检查真实界面、IPC、协议状态机、工作区选择、取消和入库，后者保留手动设备授权回归。它们不证明真实上游授权或模型能力；真实对照证据应单独保留在忽略的私密目录。
+
 ## 版本发布
 
 1. 同步修改 `desktop/package.json`、`desktop/package-lock.json` 的版本，更新 `CHANGELOG.md`。

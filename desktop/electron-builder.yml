@@ -12,6 +12,8 @@ files:
   - assets/icon.png
   - package.json
 extraResources:
+  - from: login-helper/${os}-${arch}/
+    to: login-helper
   - from: backend/${os}-${arch}/
     to: backend
   - from: ../LICENSE

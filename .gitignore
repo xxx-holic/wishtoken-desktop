@@ -25,6 +25,7 @@ sub2api-rotation-*.json
 /desktop/node_modules/
 /desktop/release/
 /desktop/backend/
+/desktop/login-helper/
 *.exe
 *.zip
 *.dmg

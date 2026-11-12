@@ -99,6 +99,11 @@ type PickOptions struct {
 
 // Pick returns a copy of the chosen account with a fresh access token.
 func (p *Pool) Pick(ctx context.Context, opts PickOptions) (*account.Account, error) {
+	if opts.AccountID != "" && opts.Route == "codex" {
+		if acc, ok := p.store.Get(opts.AccountID); ok && acc.OAuthClientID == account.BPSOAuthClientID {
+			return nil, errors.New("selected account has BPS authorization; select its separate Codex login for the native channel")
+		}
+	}
 	candidates := p.candidates(opts)
 	if len(candidates) == 0 {
 		if p.store.Count() == 0 {
@@ -133,6 +138,12 @@ func (p *Pool) candidates(opts PickOptions) []account.Account {
 	defer p.mu.Unlock()
 	usable := make([]account.Account, 0, len(all))
 	for _, acc := range all {
+		if (acc.Provider == "kilo") != (opts.Route == "kilo") {
+			continue
+		}
+		if opts.Route == "codex" && acc.OAuthClientID == account.BPSOAuthClientID {
+			continue
+		}
 		if opts.AccountID != "" && acc.ID != opts.AccountID {
 			continue
 		}
@@ -217,6 +228,12 @@ func (p *Pool) Ensure(ctx context.Context, id string) (*account.Account, error) 
 	if !ok {
 		return nil, account.ErrNotFound
 	}
+	if acc.Provider == "kilo" {
+		if acc.Usable() {
+			return &acc, nil
+		}
+		return nil, errors.New("Kilo credential expired or disabled; authorize Kilo again")
+	}
 	if acc.AccessToken != "" && acc.AccountID != "" && !acc.ExpiringWithin(refreshAhead) {
 		return &acc, nil
 	}
@@ -226,6 +243,9 @@ func (p *Pool) Ensure(ctx context.Context, id string) (*account.Account, error) 
 // Refresh exchanges the refresh token of account id. With force=false a token
 // that is still fresh is returned unchanged.
 func (p *Pool) Refresh(ctx context.Context, id string, force bool) (*account.Account, error) {
+	if acc, ok := p.store.Get(id); ok && acc.Provider == "kilo" {
+		return nil, errors.New("Kilo credentials use independent device authorization; authorize Kilo again")
+	}
 	mu := p.refreshLock(id)
 	mu.Lock()
 	defer mu.Unlock()
@@ -235,6 +255,9 @@ func (p *Pool) Refresh(ctx context.Context, id string, force bool) (*account.Acc
 	}
 	if !force && acc.AccessToken != "" && acc.AccountID != "" && !acc.ExpiringWithin(refreshAhead) {
 		return &acc, nil
+	}
+	if acc.OAuthClientID == account.BPSOAuthClientID && acc.RefreshFailures > 0 {
+		return nil, errors.New("BPS refresh previously failed; authorize BPS again to avoid replaying a rotated refresh grant")
 	}
 	if strings.TrimSpace(acc.RefreshToken) == "" {
 		if acc.AccessToken != "" && acc.AccountID != "" && !acc.Expired() {
@@ -251,6 +274,7 @@ func (p *Pool) Refresh(ctx context.Context, id string, force bool) (*account.Acc
 		stored.LastError = acc.LastError
 		stored.RefreshFailures = acc.RefreshFailures
 		if err == nil {
+			stored.OAuthClientID = acc.OAuthClientID
 			stored.AccessToken, stored.RefreshToken, stored.IDToken = acc.AccessToken, acc.RefreshToken, acc.IDToken
 			stored.ExpiresAt, stored.LastRefresh = acc.ExpiresAt, acc.LastRefresh
 			stored.Email, stored.AccountID, stored.UserID, stored.PlanType = acc.Email, acc.AccountID, acc.UserID, acc.PlanType
@@ -390,6 +414,9 @@ func (p *Pool) RunMaintenance(ctx context.Context, identity upstream.Identity) {
 		}
 		cfg := p.cfg()
 		for _, acc := range p.store.List() {
+			if acc.Provider == "kilo" {
+				continue
+			}
 			if acc.Disabled || !acc.HasCredentials() {
 				continue
 			}
@@ -408,6 +435,9 @@ func (p *Pool) RunMaintenance(ctx context.Context, identity upstream.Identity) {
 
 // ProbeUsage refreshes the usage snapshot of account id.
 func (p *Pool) ProbeUsage(ctx context.Context, id string, identity upstream.Identity) (*account.Usage, error) {
+	if a, ok := p.store.Get(id); ok && a.Provider == "kilo" {
+		return nil, errors.New("Kilo subscription usage is available in the linked ChatGPT usage page")
+	}
 	acc, err := p.Ensure(ctx, id)
 	if err != nil {
 		return nil, err

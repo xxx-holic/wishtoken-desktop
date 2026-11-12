@@ -43,11 +43,12 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		t.Fatalf("default load: %v %+v", err, cfg)
 	}
 	cfg.DefaultModel = "gpt-6-astra"
+	cfg.BPSTransport = "websocket"
 	if err := cfg.Save(path); err != nil {
 		t.Fatal(err)
 	}
 	again, err := Load(path)
-	if err != nil || again.DefaultModel != "gpt-6-astra" {
+	if err != nil || again.DefaultModel != "gpt-6-astra" || again.BPSTransport != "websocket" {
 		t.Fatalf("reload: %v %+v", err, again)
 	}
 }
@@ -62,5 +63,22 @@ func TestIsLoopback(t *testing.T) {
 		if IsLoopback(bad) {
 			t.Fatalf("%q should not be loopback", bad)
 		}
+	}
+}
+
+func TestExplicitBPSTransport(t *testing.T) {
+	cfg := Default()
+	if cfg.BPSTransport != "http" {
+		t.Fatal("legacy default changed")
+	}
+	for _, value := range []string{"http", "websocket", ""} {
+		cfg.BPSTransport = value
+		if err := cfg.Normalize(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg.BPSTransport = "auto"
+	if cfg.Normalize() == nil {
+		t.Fatal("silent transport fallback must not be configurable")
 	}
 }

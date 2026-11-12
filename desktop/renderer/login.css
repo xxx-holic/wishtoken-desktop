@@ -1,0 +1,33 @@
+.login-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 22px}
+.login-tabs [aria-current=page]{color:var(--accent);background:var(--accent-soft);border-color:var(--accent)}
+dialog.auto-login-dialog{width:660px;max-width:calc(100vw - 48px);max-height:calc(100vh - 48px);padding:28px;overflow:auto}
+.auto-login-dialog .field-label{font-size:13px;color:var(--text)}
+#modal-content .login-hint{font-size:13px;line-height:1.65;margin:9px 0 20px;color:var(--text)}
+.login-input-label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+.login-input-label label:last-child{white-space:nowrap;font-size:12px}
+.login-input-label .field-label{margin:0}
+#modal-content #auto-login-input{height:152px;min-height:100px;max-height:280px;font-size:14px;line-height:1.7;padding:12px}
+.login-secret{-webkit-text-security:disc}
+#auto-login-input::placeholder{color:var(--text);opacity:.7;-webkit-text-security:none}
+#auto-login-input{caret-color:var(--accent)}
+.auto-login-dialog ::selection{color:var(--text);background:var(--accent-soft)}
+.auto-login-dialog :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.login-summary{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px}
+#auto-login-progress{display:block;width:100%;height:6px;margin:12px 0 16px;accent-color:var(--accent)}
+.login-queue{list-style:none;padding:0;margin:0;max-height:min(48vh,440px);overflow:auto;scrollbar-color:var(--line) transparent}
+.login-queue-row{padding:14px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.login-queue-row:first-child{padding-top:0}
+.login-row-heading{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.login-row-heading strong{font-size:14px;font-weight:600;min-width:0}
+.login-state{font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.login-queue-row[data-status=completed] .login-state{color:var(--accent)}
+.login-queue-row[data-status=failed] .login-state{color:#bd3838}
+#modal-content .login-queue-row p{font-size:13px;line-height:1.55;margin:6px 0;color:var(--text)}
+.login-queue-row small{font-size:12px}
+.login-workspaces{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.login-workspaces button{white-space:normal;text-align:left}
+.login-use{display:flex;margin-top:10px}
+html[data-theme=dark] .login-queue-row[data-status=failed] .login-state,
+html[data-theme=dark] .auto-login-dialog .danger-text{color:#ff9c9c}
+#modal-content .login-footer{flex-wrap:wrap;gap:8px;margin-top:22px}
+@media(max-height:740px){dialog.auto-login-dialog{padding:22px}#modal-content #auto-login-input{height:110px}.login-queue{max-height:36vh}}

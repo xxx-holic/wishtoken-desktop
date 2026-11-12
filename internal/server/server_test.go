@@ -95,6 +95,8 @@ func newFixture(t *testing.T, cfg *config.Config, accounts ...account.Account) *
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Codex-Turn-State", "fixture-healthy-state")
+		w.Header().Set("X-Codex-Safety-Buffering-Enabled", "false")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, textStream("resp_codex", "pong from codex"))
 	}))
@@ -230,14 +232,20 @@ func TestResponsesNativePassThroughWithCodexClient(t *testing.T) {
 	cfg := config.Default()
 	cfg.RoutePolicy = config.PolicyCodexOnly
 	f := newFixture(t, cfg, testAccount("acct_one", "one@example.com"))
-	headers := map[string]string{"User-Agent": "codex-tui/0.153.3 (Mac OS 15.5.0; arm64) xterm-256color (codex-tui; 0.153.3)", "Originator": "codex-tui", "session-id": "sess-123"}
+	headers := map[string]string{"User-Agent": "codex-tui/0.153.3 (Mac OS 15.5.0; arm64) xterm-256color (codex-tui; 0.153.3)", "Originator": "codex-tui", "session-id": "sess-123", "X-Codex-Turn-State": "fixture-client-state"}
 	resp, body := post(t, f.api.URL+"/v1/responses", object{"model": "gpt-6-astra", "input": "ping", "stream": true, "instructions": "x"}, headers)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "pong from codex") || !strings.Contains(body, "event: response.completed") {
 		t.Fatalf("native stream: %d %s", resp.StatusCode, body)
 	}
+	if resp.Header.Get("X-Codex-Turn-State") != "fixture-healthy-state" {
+		t.Fatalf("turn-state not forwarded downstream: %v", resp.Header)
+	}
 	hdr := f.codexHdr.Load().(http.Header)
 	if hdr.Get("Originator") != "codex-tui" || hdr.Get("Session-Id") != "sess-123" || hdr.Get("Chatgpt-Account-Id") != "acct_one" || hdr.Get("X-Codex-Beta-Features") == "" {
 		t.Fatalf("codex headers: %v", hdr)
+	}
+	if hdr.Get("X-Codex-Turn-State") != "fixture-client-state" {
+		t.Fatalf("turn-state not forwarded upstream: %v", hdr)
 	}
 	if f.bpsHits.Load() != 0 {
 		t.Fatal("codex_only must not touch basispoints")

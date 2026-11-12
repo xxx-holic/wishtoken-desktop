@@ -38,20 +38,38 @@ def asar_files(raw):
     return output
 
 
+def audit_payload(payload):
+    expected = {"main.cjs", "preload.cjs", "assets/icon.png", "package.json"}
+    for folder in ("lib", "renderer"):
+        expected.update(p.relative_to(DESKTOP).as_posix() for p in (DESKTOP / folder).rglob("*") if p.is_file())
+    source_package = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((DESKTOP / "package-lock.json").read_text(encoding="utf-8"))
+    dependencies = source_package.get("dependencies", {})
+    require(set(dependencies) == {"playwright-core"}, "Review new runtime dependencies before packaging")
+    for name, version in dependencies.items():
+        prefix = "node_modules/" + name
+        installed = json.loads((DESKTOP / prefix / "package.json").read_text(encoding="utf-8"))
+        require(installed["version"] == version == lock["packages"][prefix]["version"], "Runtime dependency version mismatch")
+        # Electron Builder removes package READMEs and TypeScript declarations.
+        # Every remaining runtime file must be present and match npm ci's locked source.
+        expected.update(p.relative_to(DESKTOP).as_posix() for p in (DESKTOP / prefix).rglob("*")
+                        if p.is_file() and p.name != "README.md" and not p.name.endswith(".d.ts"))
+    require(set(payload) == expected, "Application file allowlist mismatch")
+    pkg = json.loads(payload["package.json"])
+    require(pkg["name"] == "wishtoken-desktop" and pkg["version"] == VERSION, "Package identity mismatch")
+    require(pkg.get("dependencies", {}) == dependencies, "Packaged runtime dependencies changed")
+    for name, raw in payload.items():
+        if name.startswith("node_modules/"):
+            require(raw == (DESKTOP / name).read_bytes(), "Runtime source mismatch: " + name)
+        elif name != "package.json":
+            require(raw.replace(b"\r\n", b"\n") == (DESKTOP / name).read_bytes().replace(b"\r\n", b"\n"), "Source mismatch: " + name)
+
+
 def audit_tree(root):
     asars = list(root.rglob("app.asar"))
     require(len(asars) == 1, "Expected one app.asar")
     app = asars[0].parent.parent
-    payload = asar_files(asars[0].read_bytes())
-    expected = {"main.cjs", "preload.cjs", "assets/icon.png", "package.json"}
-    for folder in ("lib", "renderer"):
-        expected.update(p.relative_to(DESKTOP).as_posix() for p in (DESKTOP / folder).rglob("*") if p.is_file())
-    require(set(payload) == expected, "Application file allowlist mismatch")
-    pkg = json.loads(payload["package.json"])
-    require(pkg["name"] == "wishtoken-desktop" and pkg["version"] == VERSION, "Package identity mismatch")
-    for name, raw in payload.items():
-        if name != "package.json":
-            require(raw.replace(b"\r\n", b"\n") == (DESKTOP / name).read_bytes().replace(b"\r\n", b"\n"), "Source mismatch: " + name)
+    audit_payload(asar_files(asars[0].read_bytes()))
     for binary in (app / "wishtoken-desktop", app / "resources/backend/gptbridge"):
         raw = binary.read_bytes()
         require(raw[:5] == b"\x7fELF\x02" and struct.unpack_from("<H", raw, 18)[0] == 62, "Expected x86-64 ELF")

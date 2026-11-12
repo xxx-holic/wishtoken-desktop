@@ -20,7 +20,7 @@ def secrets_from(samples):
     def walk(value):
         if isinstance(value, dict):
             for key, item in value.items():
-                if key in ('access_token','refresh_token','id_token','api_key') and isinstance(item,str) and len(item)>12:
+                if key in ('access_token','refresh_token','id_token','api_key','password','seed','mfa_secret','totp_secret') and isinstance(item,str) and len(item)>12:
                     secrets.add(item.encode())
                 else: walk(item)
         elif isinstance(value,list):

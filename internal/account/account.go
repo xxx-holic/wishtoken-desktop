@@ -22,8 +22,14 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/jwt"
 )
 
+const (
+	CodexOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+	BPSOAuthClientID   = "app_fnr0pYvVwwFDocDumLG3H2Bp"
+)
+
 // Account is one ChatGPT login usable by the bridge.
 type Account struct {
+	Provider          string    `json:"provider,omitempty"`
 	ID                string    `json:"id"`
 	Name              string    `json:"name,omitempty"`
 	Email             string    `json:"email,omitempty"`
@@ -33,6 +39,7 @@ type Account struct {
 	AccessToken       string    `json:"access_token,omitempty"`
 	RefreshToken      string    `json:"refresh_token,omitempty"`
 	IDToken           string    `json:"id_token,omitempty"`
+	OAuthClientID     string    `json:"oauth_client_id,omitempty"`
 	ExpiresAt         time.Time `json:"expires_at"`
 	LastRefresh       time.Time `json:"last_refresh"`
 	SubscriptionUntil time.Time `json:"subscription_until"`
@@ -76,6 +83,23 @@ type Stats struct {
 
 // Identity returns the key used to detect duplicates.
 func (a *Account) Identity() string {
+	if a.Provider == "kilo" {
+		if a.AccountID != "" {
+			return "kilo:" + a.AccountID
+		}
+		sum := sha256.Sum256([]byte(a.AccessToken))
+		return "kilo-key:" + hex.EncodeToString(sum[:16])
+	}
+	// Office and Codex issue independent grants for the same member/workspace.
+	// Keep their credentials separate while retaining legacy Codex identities.
+	if a.OAuthClientID != "" && a.OAuthClientID != CodexOAuthClientID {
+		copy := *a
+		copy.OAuthClientID = ""
+		if identity := copy.Identity(); identity != "" {
+			return identity + "|oauth:" + a.OAuthClientID
+		}
+		return ""
+	}
 	if id := strings.TrimSpace(a.AccountID); id != "" {
 		// A Team workspace is shared by many members. Deduplicate by member
 		// AND workspace so importing a second child cannot replace the first.
@@ -146,6 +170,47 @@ func (a *Account) ExpiringWithin(d time.Duration) bool {
 
 // FillFromTokens completes missing identity fields from the JWT claims.
 func (a *Account) FillFromTokens() {
+	if a.Provider == "kilo" {
+		// Kilo credentials must never be interpreted as a ChatGPT OAuth grant.
+		if claims, err := jwt.Decode(a.AccessToken); err == nil {
+			if a.AccountID == "" {
+				a.AccountID, _ = claims.Raw["sub"].(string)
+			}
+			if a.Email == "" {
+				a.Email, _ = claims.Raw["email"].(string)
+			}
+			if a.ExpiresAt.IsZero() {
+				a.ExpiresAt = jwt.Expiry(a.AccessToken)
+			}
+		}
+		if a.AccountID == "" && a.AccessToken != "" {
+			sum := sha256.Sum256([]byte(a.AccessToken))
+			a.AccountID = "key-" + hex.EncodeToString(sum[:16])
+		}
+		return
+	}
+	if claims, err := jwt.Decode(a.AccessToken); err == nil {
+		if client, ok := claims.Raw["client_id"].(string); ok && client != "" {
+			a.OAuthClientID = client
+		}
+	}
+	if a.OAuthClientID == "" {
+		if claims, err := jwt.Decode(a.IDToken); err == nil {
+			switch audience := claims.Raw["aud"].(type) {
+			case string:
+				if audience == CodexOAuthClientID || audience == BPSOAuthClientID {
+					a.OAuthClientID = audience
+				}
+			case []any:
+				for _, item := range audience {
+					if item == CodexOAuthClientID || item == BPSOAuthClientID {
+						a.OAuthClientID, _ = item.(string)
+						break
+					}
+				}
+			}
+		}
+	}
 	for _, token := range []string{a.IDToken, a.AccessToken} {
 		if token == "" {
 			continue
@@ -177,11 +242,13 @@ func (a *Account) FillFromTokens() {
 
 // View is the redacted representation exposed to the dashboard.
 type View struct {
+	Provider          string    `json:"provider,omitempty"`
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Email             string    `json:"email"`
 	AccountID         string    `json:"account_id"`
 	PlanType          string    `json:"plan_type"`
+	OAuthClientID     string    `json:"oauth_client_id,omitempty"`
 	ExpiresAt         string    `json:"expires_at,omitempty"`
 	LastRefresh       string    `json:"last_refresh,omitempty"`
 	SubscriptionUntil string    `json:"subscription_until,omitempty"`
@@ -205,10 +272,12 @@ type View struct {
 // View returns the redacted representation.
 func (a *Account) View() View {
 	v := View{
-		ID: a.ID, Name: a.Name, Email: a.Email, AccountID: MaskID(a.AccountID), PlanType: a.PlanType,
+		Provider: a.Provider,
+		ID:       a.ID, Name: a.Name, Email: a.Email, AccountID: MaskID(a.AccountID), PlanType: a.PlanType,
 		Disabled: a.Disabled, HasRefreshToken: a.RefreshToken != "", HasAccessToken: a.AccessToken != "",
 		Expired: a.Expired(), ProxyURL: redactProxy(a.ProxyURL), Source: a.Source, Tags: a.Tags,
 		LastError: a.LastError, Usage: a.Usage, Stats: a.Stats, CreatedAt: a.CreatedAt,
+		OAuthClientID: a.OAuthClientID,
 	}
 	v.ExpiresAt = formatTime(a.ExpiresAt)
 	v.LastRefresh = formatTime(a.LastRefresh)
@@ -402,6 +471,12 @@ func (s *Store) Upsert(acc Account) (UpsertResult, error) {
 }
 
 func mergeInto(dst, src *Account) {
+	if src.Provider != "" {
+		dst.Provider = src.Provider
+	}
+	if src.OAuthClientID != "" {
+		dst.OAuthClientID = src.OAuthClientID
+	}
 	if src.AccessToken != "" {
 		newer := dst.ExpiresAt.IsZero() || src.ExpiresAt.After(dst.ExpiresAt) || dst.AccessToken == ""
 		if newer {

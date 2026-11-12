@@ -24,7 +24,7 @@ func (s *Server) handleDesktopAPI(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config()
 	remote, _, _ := net.SplitHostPort(r.RemoteAddr)
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/desktop-api/"), "/")
-	if !cfg.DesktopMode || cfg.APIKey == "" || !config.IsLoopback(remote) || len(parts) != 5 || parts[3] != "v1" || (parts[2] != "bps" && parts[2] != "codex") || !hmac.Equal([]byte(parts[0]), []byte(desktopScope(cfg.APIKey, parts[1], parts[2]))) || r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+	if !cfg.DesktopMode || cfg.APIKey == "" || !config.IsLoopback(remote) || len(parts) != 5 || parts[3] != "v1" || (parts[2] != "bps" && parts[2] != "codex" && parts[2] != "work") || !hmac.Equal([]byte(parts[0]), []byte(desktopScope(cfg.APIKey, parts[1], parts[2]))) || r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		writeError(w, r, 401, "desktop_auth", "authentication_error", "invalid local desktop request")
 		return
 	}
