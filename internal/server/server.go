@@ -21,8 +21,9 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/api"
 	"github.com/xxx-holic/wishtoken-desktop/internal/basispoints"
+	"github.com/xxx-holic/wishtoken-desktop/internal/channelname"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
-	"github.com/xxx-holic/wishtoken-desktop/internal/kilo"
+	"github.com/xxx-holic/wishtoken-desktop/internal/fenjue"
 	"github.com/xxx-holic/wishtoken-desktop/internal/localcodex"
 	"github.com/xxx-holic/wishtoken-desktop/internal/oauth"
 	"github.com/xxx-holic/wishtoken-desktop/internal/pool"
@@ -58,8 +59,8 @@ type Server struct {
 	loginID            string
 	loginAt            time.Time
 	loginExpectedEmail string
-	kiloMu             sync.Mutex
-	kiloLogin          *kiloLogin
+	fenjueMu           sync.Mutex
+	fenjueLogin        *fenjueLogin
 }
 
 // New wires the bridge components together.
@@ -72,7 +73,7 @@ func New(cfg *config.Config, cfgPath string, store *account.Store) *Server {
 		Pool:        s.Pool,
 		BPS:         &upstream.BPSClient{},
 		Codex:       s.Codex,
-		Kilo:        &kilo.Client{},
+		Fenjue:      &fenjue.Client{},
 		Replay:      basispoints.NewReplayCache(),
 		Attachments: &basispoints.AttachmentCache{},
 		Observer:    s.logs.add,
@@ -558,9 +559,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config()
 	now := time.Now().Unix()
 	data := make([]any, 0, len(basispoints.Catalog)*2)
-	if r.Header.Get("X-GPTBridge-Channel") == "kilo" {
-		for _, id := range kilo.Models {
-			data = append(data, object{"id": id, "object": "model", "owned_by": "kilo", "availability": "checked before generation"})
+	if channelname.Normalize(r.Header.Get("X-GPTBridge-Channel")) == "fenjue" {
+		for _, id := range fenjue.Models {
+			data = append(data, object{"id": id, "object": "model", "owned_by": "fenjue", "availability": "checked before generation"})
 		}
 		api.WriteJSON(w, 200, object{"object": "list", "data": data})
 		return

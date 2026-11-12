@@ -111,7 +111,7 @@ func (s *Server) adminPelican(w http.ResponseWriter, r *http.Request) {
 	var usage any
 	if collected.Response["usage"] != nil {
 		usage = object{"input_tokens": in, "output_tokens": out, "reasoning_tokens": reasoning, "cached_tokens": cached}
-		if channel == "kilo" {
+		if channel == "fenjue" {
 			if raw, ok := collected.Response["usage"].(object); ok {
 				usage.(object)["is_byok"] = raw["is_byok"]
 				usage.(object)["cost"] = raw["cost"]

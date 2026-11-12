@@ -10,7 +10,7 @@ Select BPS or native Codex explicitly (BPS by default). Sessions remain pinned t
 
 Account credentials stay in the local data directory. There is no telemetry, embedded account, invitation credential, or automatic upload to WishToken. Optional business and release links open in your browser.
 
-Current preview: `0.9.0-kilo-preview.1`. See [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases) for platform downloads and validation status. Kilo adds separate device authorization, linked ChatGPT subscription checks and an explicit Responses route with tools/images. Original candy (21), animated pelican, PNG reading and actual Codex CLI file operations were observed. A degraded-native / passing-Kilo comparison is still absent. See [Kilo setup and verification](docs/KILO_PREVIEW.md).
+Current preview: `0.9.0-fenjue-preview.1`. See [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases) for platform downloads and validation status. Fenjue adds separate device authorization, linked ChatGPT subscription checks and an explicit Responses route with tools/images. Original candy (21), animated pelican, PNG reading and actual Codex CLI file operations were observed. A degraded-native / passing-Fenjue comparison is still absent. See [Fenjue setup and verification](docs/FENJUE_PREVIEW.md).
 
 Preview.5 adds protocol-first child account import: paste one `email----password----TOTP seed` per line and explicitly choose Codex or BPS authorization. Accounts use separate HTTP sessions, multiple workspaces require a selection, and saved records can be selected immediately. Passwords and seeds are transient and never written to the account store. Browser automation remains an explicit fallback; JSON import is unchanged. See [authorization and verification](docs/BPS_TRANSPORT.md).
 
@@ -26,7 +26,7 @@ The bundled protocol transport is built with Python 3.12: from the repository ro
 
 Accounts, subscription top-ups and metered multi-model API access:
 
-- [Account shop](https://wishtoken.team/): ChatGPT, Claude, Gemini, Grok, Cursor, Kiro and Muse accounts, seats, subscriptions and credit packages; self-operated Team5X / GPT Free and full-price ChatGPT / Claude / Grok top-ups.
+- [Account shop](https://wishtoken.team/): ChatGPT, Claude, Gemini, Grok, Cursor and Muse accounts, seats, subscriptions and credit packages; self-operated Team5X / GPT Free and full-price ChatGPT / Claude / Grok top-ups.
 - [API relay](https://wishtoapp.com/): choose a channel and pay by usage. [Current channels and rates](https://sub2api.wishtoapp.com/guide/channels?utm_source=wishtoken).
 - [Liandong shop](https://wzyp.cn/shop/6YHGJOPN): additional accounts and services. Check each product page for price, stock, delivery and warranty.
 - Wholesale, reseller onboarding, free distribution keys and automatic pool replenishment. [Hosted dispatch beta](https://wishtoken.team/shop/dispatch) tracks owner accounts, schedules and output, with TXT / ZIP delivery. New onboarding is subject to page availability; contact [@wishtoken_team](https://t.me/wishtoken_team). Distribution code: `r5tcjnab`.

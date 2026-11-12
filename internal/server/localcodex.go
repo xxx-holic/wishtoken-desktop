@@ -15,6 +15,7 @@ import (
 
 	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/api"
+	"github.com/xxx-holic/wishtoken-desktop/internal/channelname"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
 	"github.com/xxx-holic/wishtoken-desktop/internal/jwt"
 	"github.com/xxx-holic/wishtoken-desktop/internal/localcodex"
@@ -47,6 +48,9 @@ func launchHistory() []launchRecord {
 	}
 	if entries == nil {
 		entries = []launchRecord{}
+	}
+	for i := range entries {
+		entries[i].Channel = channelname.Normalize(entries[i].Channel)
 	}
 	return entries
 }
@@ -141,12 +145,12 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.Channel = channel
-	if (a.Provider == "kilo") != (channel == "kilo") {
-		writeError(w, r, 400, "credential_channel_mismatch", "invalid_request_error", "Kilo requires an independent Kilo credential")
+	if (a.Provider == "fenjue") != (channel == "fenjue") {
+		writeError(w, r, 400, "credential_channel_mismatch", "invalid_request_error", "Fenjue requires an independent Fenjue credential")
 		return
 	}
-	if channel == "kilo" && req.Target == "app" && req.AppMode != "isolated" {
-		writeError(w, r, 400, "kilo_app_mode", "invalid_request_error", "Kilo uses an isolated Codex instance; choose isolated mode")
+	if channel == "fenjue" && req.Target == "app" && req.AppMode != "isolated" {
+		writeError(w, r, 400, "fenjue_app_mode", "invalid_request_error", "Fenjue uses an isolated Codex instance; choose isolated mode")
 		return
 	}
 	if channel == "codex" && a.OAuthClientID == account.BPSOAuthClientID {
@@ -222,12 +226,12 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 	identity := o.AccountID + "\n" + identityDir
 	// Keep existing BPS histories; native sessions get a separate profile.
 	if channel != "bps" {
-		identity += "\n" + channel
+		identity += "\n" + channelname.IdentityKey(channel)
 	}
 	key := sha256.Sum256([]byte(identity))
 	instanceID := hex.EncodeToString(key[:10])
 	o.Home = filepath.Join(config.Home(), "codex-instances", instanceID)
-	if channel != "prism" && channel != "kilo" && s.Config().DesktopMode && s.Config().CockpitKey != "" && jwt.IsJWT(a.AccessToken) {
+	if channel != "prism" && channel != "fenjue" && s.Config().DesktopMode && s.Config().CockpitKey != "" && jwt.IsJWT(a.AccessToken) {
 		o.AccessToken = a.AccessToken
 		o.AuthAPIURL = s.baseURL() + "/cockpit-auth/" + s.Config().CockpitKey
 	}

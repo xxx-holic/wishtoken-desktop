@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xxx-holic/wishtoken-desktop/internal/channelname"
 	"github.com/xxx-holic/wishtoken-desktop/internal/jwt"
 )
 
@@ -213,7 +214,7 @@ func walk(value any, source string, res *ImportResult, depth int) {
 }
 
 func looksLikeCredential(m map[string]any) bool {
-	if strings.EqualFold(getString(m, "type", "provider", "channel"), "kilo") && getString(m, "api_key", "token", "access_token") != "" {
+	if channelname.Normalize(getString(m, "type", "provider", "channel")) == "fenjue" && getString(m, "api_key", "token", "access_token") != "" {
 		return true
 	}
 	for _, key := range []string{"access_token", "accessToken", "refresh_token", "refreshToken", "id_token", "idToken"} {
@@ -225,14 +226,14 @@ func looksLikeCredential(m map[string]any) bool {
 }
 
 func addEntry(m map[string]any, source string, res *ImportResult) {
-	if strings.EqualFold(getString(m, "type", "provider", "channel"), "kilo") {
+	if channelname.Normalize(getString(m, "type", "provider", "channel")) == "fenjue" {
 		token := strings.TrimSpace(strings.TrimPrefix(getString(m, "api_key", "access_token", "token"), "Bearer "))
 		if len(token) < 20 || len(token) > 16384 || strings.ContainsAny(token, " \r\n\t") {
-			res.Warnings = append(res.Warnings, "skipped invalid Kilo credential")
+			res.Warnings = append(res.Warnings, "skipped invalid Fenjue credential")
 			res.Skipped++
 			return
 		}
-		acc := Account{Provider: "kilo", AccessToken: token, AccountID: getString(m, "user_id", "account_id"), Email: getString(m, "email"), Name: getString(m, "name", "label"), ProxyURL: getString(m, "proxy_url"), Source: source}
+		acc := Account{Provider: "fenjue", AccessToken: token, AccountID: getString(m, "user_id", "account_id"), Email: getString(m, "email"), Name: getString(m, "name", "label"), ProxyURL: getString(m, "proxy_url"), Source: source}
 		acc.FillFromTokens()
 		res.Accounts = append(res.Accounts, acc)
 		return

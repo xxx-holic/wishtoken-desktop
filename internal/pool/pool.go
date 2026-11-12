@@ -138,7 +138,7 @@ func (p *Pool) candidates(opts PickOptions) []account.Account {
 	defer p.mu.Unlock()
 	usable := make([]account.Account, 0, len(all))
 	for _, acc := range all {
-		if (acc.Provider == "kilo") != (opts.Route == "kilo") {
+		if (acc.Provider == "fenjue") != (opts.Route == "fenjue") {
 			continue
 		}
 		if opts.Route == "codex" && acc.OAuthClientID == account.BPSOAuthClientID {
@@ -228,11 +228,11 @@ func (p *Pool) Ensure(ctx context.Context, id string) (*account.Account, error) 
 	if !ok {
 		return nil, account.ErrNotFound
 	}
-	if acc.Provider == "kilo" {
+	if acc.Provider == "fenjue" {
 		if acc.Usable() {
 			return &acc, nil
 		}
-		return nil, errors.New("Kilo credential expired or disabled; authorize Kilo again")
+		return nil, errors.New("Fenjue credential expired or disabled; authorize Fenjue again")
 	}
 	if acc.AccessToken != "" && acc.AccountID != "" && !acc.ExpiringWithin(refreshAhead) {
 		return &acc, nil
@@ -243,8 +243,8 @@ func (p *Pool) Ensure(ctx context.Context, id string) (*account.Account, error) 
 // Refresh exchanges the refresh token of account id. With force=false a token
 // that is still fresh is returned unchanged.
 func (p *Pool) Refresh(ctx context.Context, id string, force bool) (*account.Account, error) {
-	if acc, ok := p.store.Get(id); ok && acc.Provider == "kilo" {
-		return nil, errors.New("Kilo credentials use independent device authorization; authorize Kilo again")
+	if acc, ok := p.store.Get(id); ok && acc.Provider == "fenjue" {
+		return nil, errors.New("Fenjue credentials use independent device authorization; authorize Fenjue again")
 	}
 	mu := p.refreshLock(id)
 	mu.Lock()
@@ -414,7 +414,7 @@ func (p *Pool) RunMaintenance(ctx context.Context, identity upstream.Identity) {
 		}
 		cfg := p.cfg()
 		for _, acc := range p.store.List() {
-			if acc.Provider == "kilo" {
+			if acc.Provider == "fenjue" {
 				continue
 			}
 			if acc.Disabled || !acc.HasCredentials() {
@@ -435,8 +435,8 @@ func (p *Pool) RunMaintenance(ctx context.Context, identity upstream.Identity) {
 
 // ProbeUsage refreshes the usage snapshot of account id.
 func (p *Pool) ProbeUsage(ctx context.Context, id string, identity upstream.Identity) (*account.Usage, error) {
-	if a, ok := p.store.Get(id); ok && a.Provider == "kilo" {
-		return nil, errors.New("Kilo subscription usage is available in the linked ChatGPT usage page")
+	if a, ok := p.store.Get(id); ok && a.Provider == "fenjue" {
+		return nil, errors.New("Fenjue subscription usage is available in the linked ChatGPT usage page")
 	}
 	acc, err := p.Ensure(ctx, id)
 	if err != nil {

@@ -3,7 +3,7 @@ let workBindings=[];
 async function loadWork() {
   const select=$('work-account');
   const selected=select.value || state.selected;
-  select.innerHTML=(state.data?.accounts || []).filter(a=>!a.disabled && a.provider!=='kilo').map(a=>`<option value="${esc(a.id)}">${esc(label(a))}</option>`).join('');
+  select.innerHTML=(state.data?.accounts || []).filter(a=>!a.disabled && a.provider!=='fenjue').map(a=>`<option value="${esc(a.id)}">${esc(label(a))}</option>`).join('');
   select.value=selected; if(!select.value)select.selectedIndex=0;
   workBindings=await api.workStatus(); renderWork();
 }

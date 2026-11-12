@@ -19,8 +19,9 @@ import (
 
 	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/basispoints"
+	"github.com/xxx-holic/wishtoken-desktop/internal/channelname"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
-	"github.com/xxx-holic/wishtoken-desktop/internal/kilo"
+	"github.com/xxx-holic/wishtoken-desktop/internal/fenjue"
 	"github.com/xxx-holic/wishtoken-desktop/internal/localcodex"
 	"github.com/xxx-holic/wishtoken-desktop/internal/pool"
 	"github.com/xxx-holic/wishtoken-desktop/internal/upstream"
@@ -30,10 +31,10 @@ type object = map[string]any
 
 // Routes.
 const (
-	RouteBPS   = "bps"
-	RouteCodex = "codex"
-	RouteWork  = "work"
-	RouteKilo  = "kilo"
+	RouteBPS    = "bps"
+	RouteCodex  = "codex"
+	RouteWork   = "work"
+	RouteFenjue = "fenjue"
 )
 
 // Router executes Responses requests.
@@ -43,7 +44,7 @@ type Router struct {
 	Pool        *pool.Pool
 	BPS         *upstream.BPSClient
 	Codex       *upstream.CodexClient
-	Kilo        *kilo.Client
+	Fenjue      *fenjue.Client
 	Replay      *basispoints.ReplayCache
 	Attachments *basispoints.AttachmentCache
 	// Observer receives one record per attempt (dashboard log). Optional.
@@ -77,8 +78,8 @@ type Record struct {
 	CachedInputTokens      int64     `json:"cached_input_tokens,omitempty"`
 	OutputTokens           int64     `json:"output_tokens,omitempty"`
 	ReasoningTokens        int64     `json:"reasoning_tokens,omitempty"`
-	KiloBYOK               *bool     `json:"kilo_byok,omitempty"`
-	KiloCost               *float64  `json:"kilo_cost,omitempty"`
+	FenjueBYOK             *bool     `json:"fenjue_byok,omitempty"`
+	FenjueCost             *float64  `json:"fenjue_cost,omitempty"`
 }
 
 func copyQualityHeaders(dst, src http.Header) {
@@ -210,8 +211,9 @@ func (r *Router) Responses(ctx context.Context, req *Request) (*Result, *Error) 
 	if requested == "" {
 		requested = cfg.DefaultModel
 	}
-	if req.Headers.Get("X-GPTBridge-Channel") == RouteKilo || strings.HasSuffix(requested, "-kilo") {
-		return r.executeKilo(ctx, req, accountID, requested)
+	requested = channelname.Model(requested)
+	if channelname.Normalize(req.Headers.Get("X-GPTBridge-Channel")) == RouteFenjue || strings.HasSuffix(requested, "-fenjue") {
+		return r.executeFenjue(ctx, req, accountID, requested)
 	}
 	// Work has a separate browser identity and transport. Never enter pool retry,
 	// token refresh, BPS normalization or native fallback for this explicit route.
@@ -659,12 +661,12 @@ func (r *Router) finishObserved(accountID string, rec Record) func(object, error
 			rec.ResponseTier = str(response["service_tier"])
 			rec.StreamStatus = "completed"
 			if usage, ok := response["usage"].(object); ok {
-				if rec.Route == RouteKilo {
+				if rec.Route == RouteFenjue {
 					if v, ok := usage["is_byok"].(bool); ok {
-						rec.KiloBYOK = &v
+						rec.FenjueBYOK = &v
 					}
 					if v, ok := usage["cost"].(float64); ok {
-						rec.KiloCost = &v
+						rec.FenjueCost = &v
 					}
 				}
 				rec.InputTokens, rec.OutputTokens = toInt(usage["input_tokens"]), toInt(usage["output_tokens"])

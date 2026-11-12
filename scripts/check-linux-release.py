@@ -1,6 +1,7 @@
 """Verify Linux release identity, source payload, ELF architecture and packaging."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import stat
 import struct
@@ -63,6 +64,8 @@ def audit_payload(payload):
             require(raw == (DESKTOP / name).read_bytes(), "Runtime source mismatch: " + name)
         elif name != "package.json":
             require(raw.replace(b"\r\n", b"\n") == (DESKTOP / name).read_bytes().replace(b"\r\n", b"\n"), "Source mismatch: " + name)
+        if not name.startswith("node_modules/") and not name.endswith(".png"):
+            require(not re.search(bytes.fromhex("6b696c6f7c6b69726f"), name.encode()+raw, re.I), "Legacy provider branding in application payload")
 
 
 def audit_tree(root):
@@ -80,6 +83,14 @@ def audit_tree(root):
     return {name: hashlib.sha256((app / name).read_bytes()).hexdigest() for name in ("resources/app.asar", "resources/backend/gptbridge", "wishtoken-desktop")}
 
 
+def audit_deb_metadata(fields, version=VERSION):
+    metadata = dict(line.split(": ", 1) for line in fields.splitlines() if ": " in line)
+    # Electron Builder maps every hyphen to a tilde for Debian prereleases.
+    expected_version = version.replace("-", "~")
+    require(metadata.get("Version") == expected_version, "deb version mismatch")
+    require(metadata.get("Architecture") == "amd64", "deb architecture mismatch")
+
+
 def main():
     prefix = RELEASE / ("WishToken-Desktop-" + VERSION + "-linux-x64")
     packages = [Path(str(prefix) + ext) for ext in (".AppImage", ".deb", ".tar.gz")]
@@ -90,7 +101,7 @@ def main():
             target = Path(tmp)
             if package.suffix == ".deb":
                 fields = subprocess.check_output(["dpkg-deb", "-f", str(package), "Version", "Architecture"], text=True)
-                require(VERSION in fields and "amd64" in fields, "deb metadata mismatch")
+                audit_deb_metadata(fields)
                 subprocess.run(["dpkg-deb", "-x", str(package), str(target)], check=True)
             elif package.suffix == ".AppImage":
                 package.chmod(package.stat().st_mode | stat.S_IXUSR)

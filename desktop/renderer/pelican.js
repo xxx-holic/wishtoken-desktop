@@ -2,7 +2,7 @@
 const pelicanState = { selected: new Set(), batches: [], batch: '', loading: false, initialized: false, prompts:{} };
 const pelicanStatus = { running: '生成中', queued: '排队中', completed: '已完成', failed: '失败', cancelling: '取消中', cancelled: '已取消', interrupted: '已中断' };
 function pelicanAccounts() {
-  const accounts = (state.data?.accounts || []).filter(a => (a.provider === 'kilo') === ($('pelican-channel').value === 'kilo'));
+  const accounts = (state.data?.accounts || []).filter(a => (a.provider === 'fenjue') === ($('pelican-channel').value === 'fenjue'));
   pelicanState.selected = new Set([...pelicanState.selected].filter(id => accounts.some(a => a.id === id)));
   $('pelican-accounts').innerHTML = accounts.map(a => `<label class="pelican-account"><input type="checkbox" value="${esc(a.id)}" ${pelicanState.selected.has(a.id) ? 'checked' : ''} ${a.disabled || (a.expired && !a.has_refresh_token) ? 'disabled' : ''}><span>${esc(label(a))}<small>${esc(grantLabel(a))} · ${esc(planLabel(a))}${a.usage?.primary ? ` · 剩余 ${Math.max(0, 100 - a.usage.primary.used_percent)}%` : ' · 额度未查询'}</small></span></label>`).join('') || '<p>请先导入 Team 子号。</p>';
 }
@@ -62,7 +62,7 @@ $('pelican-benchmark').onchange=()=>{$('pelican-prompt').value=pelicanState.prom
 $('pelican-channel').onchange = () => action('pelican-channel', async () => { channelModels($('pelican-channel').value, $('pelican-model'), $('pelican-model').value); pelicanChannelOptions(); pelicanAccounts(); renderPelican(); await api.preferences({ pelican_channel: $('pelican-channel').value }); });
 $('pelican-accounts').onchange = event => { const id = event.target.value; event.target.checked ? pelicanState.selected.add(id) : pelicanState.selected.delete(id); renderPelican(); };
 $('pelican-current').onclick = () => { pelicanState.selected = new Set([state.data?.codex.active_account_id || state.selected].filter(Boolean)); pelicanAccounts(); renderPelican(); };
-$('pelican-all').onclick = () => { pelicanState.selected = new Set((state.data?.accounts || []).filter(a => !a.disabled && !(a.expired && !a.has_refresh_token) && (a.provider === 'kilo') === ($('pelican-channel').value === 'kilo')).map(a => a.id)); pelicanAccounts(); renderPelican(); };
+$('pelican-all').onclick = () => { pelicanState.selected = new Set((state.data?.accounts || []).filter(a => !a.disabled && !(a.expired && !a.has_refresh_token) && (a.provider === 'fenjue') === ($('pelican-channel').value === 'fenjue')).map(a => a.id)); pelicanAccounts(); renderPelican(); };
 $('pelican-start').onclick = () => startPelican();
 $('pelican-cancel').onclick = () => action('pelican-cancel', async () => { await api.pelicanCancel(); await loadPelican(); });
 $('pelican-history').onchange = () => { pelicanState.batch = $('pelican-history').value; renderPelican(); };

@@ -1,6 +1,6 @@
 {
   "name": "wishtoken-desktop",
-  "version": "0.9.0-kilo-preview.1",
+  "version": "0.9.0-fenjue-preview.1",
   "private": true,
   "description": "WishToken companion for local Codex accounts, explicit channels and existing workspaces",
   "main": "main.cjs",
