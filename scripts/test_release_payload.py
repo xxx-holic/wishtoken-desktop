@@ -59,5 +59,22 @@ class PayloadTests(unittest.TestCase):
             guard.audit_payload(self.payload)
 
 
+class DebMetadataTests(unittest.TestCase):
+    def test_stable_and_prerelease_versions_are_accepted(self):
+        for version, deb_version in (("0.8.3", "0.8.3"), ("0.9.0-kilo-preview.2", "0.9.0~kilo~preview.2")):
+            with self.subTest(version=version):
+                guard.audit_deb_metadata(f"Version: {deb_version}\nArchitecture: amd64\n", version)
+
+    def test_wrong_version_and_partial_matches_are_rejected(self):
+        for version in ("0.9.0-kilo-preview.2", "0.9.0~kilo~preview.1", "0.9.0~kilo~preview.20"):
+            with self.subTest(version=version), self.assertRaisesRegex(RuntimeError, "deb version mismatch"):
+                guard.audit_deb_metadata(f"Version: {version}\nArchitecture: amd64\n", "0.9.0-kilo-preview.2")
+
+    def test_missing_and_wrong_architecture_are_rejected(self):
+        for fields in ("Version: 0.8.3\n", "Version: 0.8.3\nArchitecture: arm64\n", "Version: 0.8.3\nArchitecture: not-amd64\n"):
+            with self.subTest(fields=fields), self.assertRaisesRegex(RuntimeError, "deb architecture mismatch"):
+                guard.audit_deb_metadata(fields, "0.8.3")
+
+
 if __name__ == "__main__":
     unittest.main()
