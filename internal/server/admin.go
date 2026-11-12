@@ -114,6 +114,8 @@ func (l *recordLog) list(limit int) []router.Record {
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api")
 	switch {
+	case strings.HasPrefix(path, "/kilo/"):
+		s.adminKilo(w, r, path)
 	case path == "/shutdown" && r.Method == http.MethodPost:
 		api.WriteJSON(w, http.StatusOK, object{"ok": true})
 		s.stopMu.Lock()
@@ -170,7 +172,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, object{"ok": true, "backup": backup})
 	case path == "/models" && r.Method == http.MethodGet:
 		cfg := s.Config()
-		api.WriteJSON(w, http.StatusOK, object{"catalog": basispoints.Catalog, "native_catalog": localcodex.NativeModels(), "work_catalog": localcodex.WorkModels(), "prism_catalog": localcodex.PrismModels(), "bps_models": cfg.BPSModels, "efforts": basispoints.Efforts, "work_efforts": localcodex.WorkEfforts, "prism_efforts": localcodex.PrismEfforts})
+		api.WriteJSON(w, http.StatusOK, object{"catalog": basispoints.Catalog, "native_catalog": localcodex.NativeModels(), "work_catalog": localcodex.WorkModels(), "prism_catalog": localcodex.PrismModels(), "kilo_catalog": localcodex.KiloModels(), "bps_models": cfg.BPSModels, "efforts": basispoints.Efforts, "work_efforts": localcodex.WorkEfforts, "prism_efforts": localcodex.PrismEfforts})
 	default:
 		writeError(w, r, http.StatusNotFound, "not_found", "invalid_request_error", "unknown management endpoint")
 	}
@@ -777,8 +779,8 @@ func (s *Server) adminTest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	start := time.Now()
 	headers := http.Header{}
-	if req.Route == "work" {
-		headers.Set("X-GPTBridge-Channel", "work")
+	if req.Route == "work" || req.Route == "kilo" {
+		headers.Set("X-GPTBridge-Channel", req.Route)
 	}
 	if req.AccountID != "" {
 		headers.Set("X-GPTBridge-Account", req.AccountID)

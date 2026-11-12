@@ -20,6 +20,7 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/account"
 	"github.com/xxx-holic/wishtoken-desktop/internal/basispoints"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
+	"github.com/xxx-holic/wishtoken-desktop/internal/kilo"
 	"github.com/xxx-holic/wishtoken-desktop/internal/localcodex"
 	"github.com/xxx-holic/wishtoken-desktop/internal/pool"
 	"github.com/xxx-holic/wishtoken-desktop/internal/upstream"
@@ -32,6 +33,7 @@ const (
 	RouteBPS   = "bps"
 	RouteCodex = "codex"
 	RouteWork  = "work"
+	RouteKilo  = "kilo"
 )
 
 // Router executes Responses requests.
@@ -41,6 +43,7 @@ type Router struct {
 	Pool        *pool.Pool
 	BPS         *upstream.BPSClient
 	Codex       *upstream.CodexClient
+	Kilo        *kilo.Client
 	Replay      *basispoints.ReplayCache
 	Attachments *basispoints.AttachmentCache
 	// Observer receives one record per attempt (dashboard log). Optional.
@@ -74,6 +77,8 @@ type Record struct {
 	CachedInputTokens      int64     `json:"cached_input_tokens,omitempty"`
 	OutputTokens           int64     `json:"output_tokens,omitempty"`
 	ReasoningTokens        int64     `json:"reasoning_tokens,omitempty"`
+	KiloBYOK               *bool     `json:"kilo_byok,omitempty"`
+	KiloCost               *float64  `json:"kilo_cost,omitempty"`
 }
 
 func copyQualityHeaders(dst, src http.Header) {
@@ -102,6 +107,7 @@ func noteQualityHeaders(rec *Record, header http.Header) {
 
 func normalizeModelName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.TrimPrefix(name, "openai/")
 	for _, suffix := range []string{":bps", ":codex", "-bps", "-excel", "-1m"} {
 		name = strings.TrimSuffix(name, suffix)
 	}
@@ -203,6 +209,9 @@ func (r *Router) Responses(ctx context.Context, req *Request) (*Result, *Error) 
 	requested := strings.TrimSpace(str(body["model"]))
 	if requested == "" {
 		requested = cfg.DefaultModel
+	}
+	if req.Headers.Get("X-GPTBridge-Channel") == RouteKilo || strings.HasSuffix(requested, "-kilo") {
+		return r.executeKilo(ctx, req, accountID, requested)
 	}
 	// Work has a separate browser identity and transport. Never enter pool retry,
 	// token refresh, BPS normalization or native fallback for this explicit route.
@@ -650,6 +659,14 @@ func (r *Router) finishObserved(accountID string, rec Record) func(object, error
 			rec.ResponseTier = str(response["service_tier"])
 			rec.StreamStatus = "completed"
 			if usage, ok := response["usage"].(object); ok {
+				if rec.Route == RouteKilo {
+					if v, ok := usage["is_byok"].(bool); ok {
+						rec.KiloBYOK = &v
+					}
+					if v, ok := usage["cost"].(float64); ok {
+						rec.KiloCost = &v
+					}
+				}
 				rec.InputTokens, rec.OutputTokens = toInt(usage["input_tokens"]), toInt(usage["output_tokens"])
 				if details, ok := usage["input_tokens_details"].(object); ok {
 					rec.CachedInputTokens = toInt(details["cached_tokens"])

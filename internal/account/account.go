@@ -29,6 +29,7 @@ const (
 
 // Account is one ChatGPT login usable by the bridge.
 type Account struct {
+	Provider          string    `json:"provider,omitempty"`
 	ID                string    `json:"id"`
 	Name              string    `json:"name,omitempty"`
 	Email             string    `json:"email,omitempty"`
@@ -82,6 +83,13 @@ type Stats struct {
 
 // Identity returns the key used to detect duplicates.
 func (a *Account) Identity() string {
+	if a.Provider == "kilo" {
+		if a.AccountID != "" {
+			return "kilo:" + a.AccountID
+		}
+		sum := sha256.Sum256([]byte(a.AccessToken))
+		return "kilo-key:" + hex.EncodeToString(sum[:16])
+	}
 	// Office and Codex issue independent grants for the same member/workspace.
 	// Keep their credentials separate while retaining legacy Codex identities.
 	if a.OAuthClientID != "" && a.OAuthClientID != CodexOAuthClientID {
@@ -162,6 +170,25 @@ func (a *Account) ExpiringWithin(d time.Duration) bool {
 
 // FillFromTokens completes missing identity fields from the JWT claims.
 func (a *Account) FillFromTokens() {
+	if a.Provider == "kilo" {
+		// Kilo credentials must never be interpreted as a ChatGPT OAuth grant.
+		if claims, err := jwt.Decode(a.AccessToken); err == nil {
+			if a.AccountID == "" {
+				a.AccountID, _ = claims.Raw["sub"].(string)
+			}
+			if a.Email == "" {
+				a.Email, _ = claims.Raw["email"].(string)
+			}
+			if a.ExpiresAt.IsZero() {
+				a.ExpiresAt = jwt.Expiry(a.AccessToken)
+			}
+		}
+		if a.AccountID == "" && a.AccessToken != "" {
+			sum := sha256.Sum256([]byte(a.AccessToken))
+			a.AccountID = "key-" + hex.EncodeToString(sum[:16])
+		}
+		return
+	}
 	if claims, err := jwt.Decode(a.AccessToken); err == nil {
 		if client, ok := claims.Raw["client_id"].(string); ok && client != "" {
 			a.OAuthClientID = client
@@ -215,6 +242,7 @@ func (a *Account) FillFromTokens() {
 
 // View is the redacted representation exposed to the dashboard.
 type View struct {
+	Provider          string    `json:"provider,omitempty"`
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Email             string    `json:"email"`
@@ -244,7 +272,8 @@ type View struct {
 // View returns the redacted representation.
 func (a *Account) View() View {
 	v := View{
-		ID: a.ID, Name: a.Name, Email: a.Email, AccountID: MaskID(a.AccountID), PlanType: a.PlanType,
+		Provider: a.Provider,
+		ID:       a.ID, Name: a.Name, Email: a.Email, AccountID: MaskID(a.AccountID), PlanType: a.PlanType,
 		Disabled: a.Disabled, HasRefreshToken: a.RefreshToken != "", HasAccessToken: a.AccessToken != "",
 		Expired: a.Expired(), ProxyURL: redactProxy(a.ProxyURL), Source: a.Source, Tags: a.Tags,
 		LastError: a.LastError, Usage: a.Usage, Stats: a.Stats, CreatedAt: a.CreatedAt,
@@ -442,6 +471,9 @@ func (s *Store) Upsert(acc Account) (UpsertResult, error) {
 }
 
 func mergeInto(dst, src *Account) {
+	if src.Provider != "" {
+		dst.Provider = src.Provider
+	}
 	if src.OAuthClientID != "" {
 		dst.OAuthClientID = src.OAuthClientID
 	}

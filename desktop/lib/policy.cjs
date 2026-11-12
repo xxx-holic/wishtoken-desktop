@@ -6,7 +6,7 @@ const PRISM_MODELS = new Set(['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gp
 const PRISM_EFFORTS = new Set(['low', 'medium', 'high', 'max', 'ultra']);
 function cleanChannel(value) {
   const channel = value ?? 'bps';
-  if (!['bps', 'codex', 'work', 'prism'].includes(channel)) throw new Error('请选择 BPS、原生、Work 或 Prism 通道');
+  if (!['bps', 'codex', 'work', 'prism', 'kilo'].includes(channel)) throw new Error('请选择 BPS、原生、Work、Prism 或 Kilo 通道');
   return channel;
 }
 function prismURL(value) {
@@ -48,6 +48,7 @@ function cleanLaunch(input) {
   if (typeof input.model !== 'string' || !/^[a-zA-Z0-9.-]{1,80}$/.test(input.model)) throw new Error('模型无效');
   if (!['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(input.effort)) throw new Error('推理档位无效');
   const channel = cleanChannel(input.channel), speed = input.speed ?? 'standard';
+  if (channel === 'kilo' && speed !== 'standard') throw new Error('Kilo 订阅通道使用标准速度');
   if (!['standard', 'fast'].includes(speed)) throw new Error('请选择标准或快速模式');
   if (channel === 'bps' && speed !== 'standard') throw new Error('BPS 暂不支持快速模式，请选择标准速度或原生通道');
   if (channel === 'work' && (!workModelAllowed(input.model) || !workEffortAllowed(input.effort) || speed !== 'standard')) throw new Error('Work 请选择受支持的 Work 模型与推理档位，并使用标准速度');
@@ -63,7 +64,8 @@ function cleanLaunch(input) {
     }
   }
   if (target === 'app') {
-    out.app_mode = input.app_mode ?? (channel === 'prism' ? 'isolated' : 'main');
+    out.app_mode = input.app_mode ?? (['prism','kilo'].includes(channel) ? 'isolated' : 'main');
+    if (channel === 'kilo' && out.app_mode !== 'isolated') throw new Error('Kilo 请使用独立实例');
     if (!['main', 'isolated'].includes(out.app_mode)) throw new Error('请选择主应用或独立实例');
     if (channel === 'prism' && out.app_mode !== 'isolated') throw new Error('Prism 请使用独立实例，不能接管主 Codex 配置');
   }

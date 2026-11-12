@@ -13,7 +13,7 @@ const mainProfile = require('./lib/main-profile.cjs');
 const { Pelican, DEFAULT_PROMPT } = require('./lib/pelican.cjs');
 const { CANDY_PROMPT } = require('./lib/benchmarks.cjs');
 const { Work } = require('./lib/work.cjs');
-const { externalLink } = require('./lib/links.cjs');
+const { externalLink, businessCode } = require('./lib/links.cjs');
 const { loginAction, loginURL } = require('./lib/login.cjs');
 const { AutoLogin } = require('./lib/auto-login.cjs');
 
@@ -102,6 +102,8 @@ async function handle(method, input) {
     case 'autoLoginOpen': return autoLogin.open(input);
     case 'autoLoginChoose': return autoLogin.choose(input);
     case 'loginStatus': return loginAction(service, 'status', input);
+    case 'kiloSubscription': return service.request(`/api/kilo/subscription?account_id=${requireID(input)}`);
+    case 'kiloOpen': await shell.openExternal('https://app.kilo.ai/byok'); return { opened:true };
     case 'loginCancel': return loginAction(service, 'cancel', input);
     case 'loginOpen': {
       const pending = await loginAction(service, 'status', input);
@@ -247,6 +249,7 @@ async function handle(method, input) {
       return true;
     }
     case 'openLink': await shell.openExternal(externalLink(input)); return true;
+    case 'copyBusinessCode': clipboard.writeText(businessCode(input)); return true;
     case 'openData': {
       const error = await shell.openPath(dataHome); if (error) throw new Error(error); return true;
     }

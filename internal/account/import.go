@@ -213,6 +213,9 @@ func walk(value any, source string, res *ImportResult, depth int) {
 }
 
 func looksLikeCredential(m map[string]any) bool {
+	if strings.EqualFold(getString(m, "type", "provider", "channel"), "kilo") && getString(m, "api_key", "token", "access_token") != "" {
+		return true
+	}
 	for _, key := range []string{"access_token", "accessToken", "refresh_token", "refreshToken", "id_token", "idToken"} {
 		if s, ok := m[key].(string); ok && strings.TrimSpace(s) != "" {
 			return true
@@ -222,6 +225,18 @@ func looksLikeCredential(m map[string]any) bool {
 }
 
 func addEntry(m map[string]any, source string, res *ImportResult) {
+	if strings.EqualFold(getString(m, "type", "provider", "channel"), "kilo") {
+		token := strings.TrimSpace(strings.TrimPrefix(getString(m, "api_key", "access_token", "token"), "Bearer "))
+		if len(token) < 20 || len(token) > 16384 || strings.ContainsAny(token, " \r\n\t") {
+			res.Warnings = append(res.Warnings, "skipped invalid Kilo credential")
+			res.Skipped++
+			return
+		}
+		acc := Account{Provider: "kilo", AccessToken: token, AccountID: getString(m, "user_id", "account_id"), Email: getString(m, "email"), Name: getString(m, "name", "label"), ProxyURL: getString(m, "proxy_url"), Source: source}
+		acc.FillFromTokens()
+		res.Accounts = append(res.Accounts, acc)
+		return
+	}
 	if kind := strings.ToLower(getString(m, "type", "provider", "channel")); kind != "" && kind != "codex" && kind != "openai" && kind != "chatgpt" && kind != "bps" {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("skipped a %q credential (only Codex/ChatGPT accounts are supported)", kind))
 		res.Skipped++

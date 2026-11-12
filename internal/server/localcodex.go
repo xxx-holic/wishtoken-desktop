@@ -141,6 +141,14 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.Channel = channel
+	if (a.Provider == "kilo") != (channel == "kilo") {
+		writeError(w, r, 400, "credential_channel_mismatch", "invalid_request_error", "Kilo requires an independent Kilo credential")
+		return
+	}
+	if channel == "kilo" && req.Target == "app" && req.AppMode != "isolated" {
+		writeError(w, r, 400, "kilo_app_mode", "invalid_request_error", "Kilo uses an isolated Codex instance; choose isolated mode")
+		return
+	}
 	if channel == "codex" && a.OAuthClientID == account.BPSOAuthClientID {
 		writeError(w, r, 400, "oauth_channel_mismatch", "invalid_request_error", "此记录是 BPS 授权，请选择同账号的 Codex 授权记录用于原生通道")
 		return
@@ -219,7 +227,7 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 	key := sha256.Sum256([]byte(identity))
 	instanceID := hex.EncodeToString(key[:10])
 	o.Home = filepath.Join(config.Home(), "codex-instances", instanceID)
-	if channel != "prism" && s.Config().DesktopMode && s.Config().CockpitKey != "" && jwt.IsJWT(a.AccessToken) {
+	if channel != "prism" && channel != "kilo" && s.Config().DesktopMode && s.Config().CockpitKey != "" && jwt.IsJWT(a.AccessToken) {
 		o.AccessToken = a.AccessToken
 		o.AuthAPIURL = s.baseURL() + "/cockpit-auth/" + s.Config().CockpitKey
 	}

@@ -1,10 +1,10 @@
 # WishToken Desktop
 
-[English](README.en.md) · [下载客户端](https://github.com/xxx-holic/wishtoken-desktop/releases) · [WishToken 官网](https://wishtoken.team/?utm_source=github&utm_medium=readme) · [公告与邀请码](https://github.com/xxx-holic/wishtoken-desktop/discussions/categories/announcements)
+[English](README.en.md) · [下载客户端](https://github.com/xxx-holic/wishtoken-desktop/releases) · [账号商城](https://wishtoken.team/) · [API 中转](https://wishtoapp.com/)
 
 WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子号 JSON，查看额度、切换主 Codex App 账号，继续原有项目和已保存会话。也支持独立实例和 CLI。Windows、macOS 与 Linux 使用同一套界面和本地服务。
 
-**[加入 Telegram 官方群](https://t.me/shouhouqun) · [开源赠送 10 个邀请码（2026-09-30）](https://github.com/xxx-holic/wishtoken-desktop/discussions/6)**
+**[TG 官方交流群](https://t.me/wishtoken_group) · [TG 通知频道](https://t.me/wishtoken_channel) · [咨询合作](https://t.me/wishtoken_team)**
 
 **账号留在本机。通道由你选择。请求结果可以核对。**
 
@@ -18,6 +18,7 @@ WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子
 - 子号账密 + 2FA 导入：每行 `邮箱----密码----2FA种子`，默认纯协议完成原生或 BPS 授权；多工作区明确选择，逐项显示结果，浏览器自动化仅作显式备用。
 - 选择 BPS、原生 Codex 或 ChatGPT Work 通道，默认 BPS；会话固定账号与通道，失败不会静默改用另一通道。Work 为本地预览功能，需单独绑定网页登录。
 - BPS 传输可显式选择 HTTP 或实验 WebSocket；运行记录区分输入、缓存、输出和推理 tokens。验证范围见 [BPS 传输与对照测试](docs/BPS_TRANSPORT.md)。
+- Kilo 订阅通道：独立设备授权、ChatGPT 订阅绑定检查、Responses API、工具与图片输入；可启动隔离 Codex App / CLI，记录 BYOK 与费用字段。实测及边界见 [Kilo 预览说明](docs/KILO_PREVIEW.md)。
 - 一键切换并启动：默认切换主 Codex App，沿用原有项目、会话和应用数据；无需项目目录。首次接管备份配置，设置中可恢复；独立实例可手动选择。CLI 按账号和项目隔离。
 - 原生通道可保存每个账号的标准／快速偏好。运行记录分别展示请求与上游返回的服务等级；请求快速不等于上游已分配快速。
 - 测智对比：鹈鹕动画与糖果题，同提示词、模型和推理档位，支持取消、重试、历史、隔离预览及原文导出。糖果题按结论 21 判定本题结果，答案不进入请求。
@@ -27,7 +28,7 @@ WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子
 
 ## 下载和开始使用
 
-当前源码为 `0.9.0-bps-preview.5`，尚未发布到 GitHub Releases。BPS 独立授权、直接生成、图片和工具往返已有实测；新增子号纯协议导入的验证范围见 [BPS 说明](docs/BPS_TRANSPORT.md)。Work 登录、API 和测试步骤见 [Work 预览说明](docs/WORK_PREVIEW.md)。
+当前源码为 `0.9.0-kilo-preview.1`，尚未发布到 GitHub Releases。新增 Kilo 通道已实测原始糖果题、鹈鹕动画、图片、函数工具及真实 Codex CLI 文件操作；尚无“同账号原生答错、Kilo 答对”的降智恢复对照，见 [Kilo 说明](docs/KILO_PREVIEW.md)。BPS 独立授权和子号协议导入见 [BPS 说明](docs/BPS_TRANSPORT.md)；Work 登录、API 和测试步骤见 [Work 预览说明](docs/WORK_PREVIEW.md)。
 
 在 [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases) 下载：
 
@@ -47,11 +48,18 @@ Linux 安装和系统终端要求见 [Linux 说明](docs/LINUX.md)。本项目�
 
 详细操作、升级及平台限制见 [使用说明](docs/QUICKSTART.md)。Apple Silicon/Intel 的包结构和核心交叉编译可检查，但不等于已通过所有 Mac 实机场景；以每个版本的发布说明为准。
 
-## WishToken 与邀请码
+## 码愿 AI × WishToken
 
-这是 [wishtoken.team](https://wishtoken.team/?utm_source=github&utm_medium=readme) 的专属开源配套客户端。[Telegram 官方群](https://t.me/shouhouqun) 用于交流与反馈。首批 [10 个赠送邀请码](https://github.com/xxx-holic/wishtoken-desktop/discussions/6) 已于 2026-09-30 发布，领取状态及使用规则以站点为准。后续不定期发放，以 [项目公告](https://github.com/xxx-holic/wishtoken-desktop/discussions/categories/announcements) 和官网为准。
+**账号现货 · 订阅代充 · API 中转，一站配齐。**
 
-客户端包含官网、邀请码公告、下载更新和 GitHub 入口。它不要求登录 WishToken 才能管理本地账号，不会自动把导入凭据发送给 WishToken。
+- **[WishToken 账号商城](https://wishtoken.team/)**：ChatGPT、Claude、Gemini、Grok、Cursor、Kiro、Muse 等账号、会员、席位与积分套餐；自营 Team5X / GPT Free，提供 ChatGPT、Claude、Grok 正价代充。
+- **[多模型 API 中转](https://wishtoapp.com/)**：GPT、Claude / Kiro、DeepSeek、Kimi、MiniMax，按量计费、分组自选。[查看当前渠道与倍率](https://sub2api.wishtoapp.com/guide/channels?utm_source=wishtoken)。
+- **[链动小铺](https://wzyp.cn/shop/6YHGJOPN)**：更多账号、订阅与配套服务。价格、库存、交付及质保规则以所购商品页面为准。
+- **批发与合作**：批量采购、免费卡密铺货、自动补池、号商入驻。[托管发车内测](https://wishtoken.team/shop/dispatch)可查看母号、排期与产出，支持 TXT / ZIP 取货；新接入联系 [@wishtoken_team](https://t.me/wishtoken_team)，以页面开放状态为准。分销码：`r5tcjnab`。
+
+**社群已迁移**：旧 TG 群转为只读。请使用 [唯一交流群](https://t.me/wishtoken_group)、[唯一通知频道](https://t.me/wishtoken_channel)；QQ 交流群 `1065568670`，在 QQ 搜群加入。
+
+桌面端“商城与合作”页集中提供上述入口和代码复制。业务页面在系统浏览器打开；管理本地账号无需登录商城，导入凭据不会自动发送给 WishToken。
 
 ## 从源码构建
 

@@ -22,6 +22,7 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/api"
 	"github.com/xxx-holic/wishtoken-desktop/internal/basispoints"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
+	"github.com/xxx-holic/wishtoken-desktop/internal/kilo"
 	"github.com/xxx-holic/wishtoken-desktop/internal/localcodex"
 	"github.com/xxx-holic/wishtoken-desktop/internal/oauth"
 	"github.com/xxx-holic/wishtoken-desktop/internal/pool"
@@ -57,6 +58,8 @@ type Server struct {
 	loginID            string
 	loginAt            time.Time
 	loginExpectedEmail string
+	kiloMu             sync.Mutex
+	kiloLogin          *kiloLogin
 }
 
 // New wires the bridge components together.
@@ -69,6 +72,7 @@ func New(cfg *config.Config, cfgPath string, store *account.Store) *Server {
 		Pool:        s.Pool,
 		BPS:         &upstream.BPSClient{},
 		Codex:       s.Codex,
+		Kilo:        &kilo.Client{},
 		Replay:      basispoints.NewReplayCache(),
 		Attachments: &basispoints.AttachmentCache{},
 		Observer:    s.logs.add,
@@ -554,6 +558,13 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Config()
 	now := time.Now().Unix()
 	data := make([]any, 0, len(basispoints.Catalog)*2)
+	if r.Header.Get("X-GPTBridge-Channel") == "kilo" {
+		for _, id := range kilo.Models {
+			data = append(data, object{"id": id, "object": "model", "owned_by": "kilo", "availability": "checked before generation"})
+		}
+		api.WriteJSON(w, 200, object{"object": "list", "data": data})
+		return
+	}
 	if cfg.DesktopMode {
 		for _, model := range localcodex.WorkModels() {
 			data = append(data, object{"id": model["id"], "object": "model", "owned_by": "chatgpt-work", "display_name": model["display_name"], "reasoning_efforts": localcodex.WorkEfforts})

@@ -111,6 +111,12 @@ func (s *Server) adminPelican(w http.ResponseWriter, r *http.Request) {
 	var usage any
 	if collected.Response["usage"] != nil {
 		usage = object{"input_tokens": in, "output_tokens": out, "reasoning_tokens": reasoning, "cached_tokens": cached}
+		if channel == "kilo" {
+			if raw, ok := collected.Response["usage"].(object); ok {
+				usage.(object)["is_byok"] = raw["is_byok"]
+				usage.(object)["cost"] = raw["cost"]
+			}
+		}
 	}
 	api.WriteJSON(w, 200, object{"text": text, "model": res.Model, "effort": res.Effort, "route": res.Route, "transport": res.Header.Get("X-GPTBridge-BPS-Transport"), "response_id": collected.Response["id"], "response_model": collected.Response["model"], "duration_ms": time.Since(start).Milliseconds(), "usage": usage})
 }

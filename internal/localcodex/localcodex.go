@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/xxx-holic/wishtoken-desktop/internal/kilo"
 )
 
 //go:embed models.json
@@ -30,8 +32,8 @@ func Channel(value string) (string, error) {
 	if value == "" {
 		return "bps", nil
 	}
-	if value != "bps" && value != "codex" && value != "work" && value != "prism" {
-		return "", fmt.Errorf("请选择 BPS、原生、Work 或 Prism 通道")
+	if value != "bps" && value != "codex" && value != "work" && value != "prism" && value != "kilo" {
+		return "", fmt.Errorf("请选择 BPS、原生、Kilo、Work 或 Prism 通道")
 	}
 	return value, nil
 }
@@ -155,6 +157,21 @@ func PrismURL(value string) (string, error) {
 func Catalog() []byte { return append([]byte(nil), modelCatalog...) }
 
 func ChannelCatalog(channel string) []byte {
+	if channel == "kilo" {
+		var manifest map[string]any
+		_ = json.Unmarshal(nativeCatalog, &manifest)
+		models := []any{}
+		for _, item := range manifest["models"].([]any) {
+			m := item.(map[string]any)
+			if id, _ := m["slug"].(string); kilo.ModelAllowed(id) {
+				m["default_service_tier"] = "default"
+				models = append(models, m)
+			}
+		}
+		manifest["models"] = models
+		raw, _ := json.Marshal(manifest)
+		return raw
+	}
 	if channel == "work" {
 		return append([]byte(nil), workCatalog...)
 	}
@@ -165,6 +182,18 @@ func ChannelCatalog(channel string) []byte {
 		return append([]byte(nil), nativeCatalog...)
 	}
 	return Catalog()
+}
+
+// KiloModels reuses known Codex client metadata, without inventing capabilities
+// for the reference's other candidate IDs. Every request also checks Kilo's catalog.
+func KiloModels() []map[string]any {
+	models := []map[string]any{}
+	for _, m := range NativeModels() {
+		if kilo.ModelAllowed(m["id"].(string)) {
+			models = append(models, m)
+		}
+	}
+	return models
 }
 
 type Options struct {
@@ -222,6 +251,9 @@ func Prepare(o Options) (Options, error) {
 		return o, channelErr
 	}
 	o.Channel = channel
+	if channel == "kilo" && (!kilo.ModelAllowed(o.Model) || (o.Speed != "" && o.Speed != "standard")) {
+		return o, fmt.Errorf("Kilo requires a supported model and standard speed")
+	}
 	if o.Speed == "" {
 		o.Speed = "standard"
 	}
@@ -296,7 +328,7 @@ func Prepare(o Options) (Options, error) {
 	}
 	// Identity is used only for App account/quota UI. Model requests retain the
 	// bridge env_key and pinned account/channel. Never share refresh-token ownership.
-	identity := o.Channel != "prism" && o.AccessToken != "" && o.AuthAPIURL != ""
+	identity := o.Channel != "prism" && o.Channel != "kilo" && o.AccessToken != "" && o.AuthAPIURL != ""
 	if identity {
 		auth, _ := json.Marshal(map[string]any{"OPENAI_API_KEY": nil, "personal_access_token": o.AccessToken})
 		if err := os.WriteFile(filepath.Join(o.Home, "auth.json.tmp"), auth, 0600); err != nil {
@@ -381,7 +413,7 @@ stream_max_retries = 2
 stream_idle_timeout_ms = 600000
 http_headers = { "X-GPTBridge-Account" = %s, "X-GPTBridge-Channel" = %s }
 `, strconv.Quote(tier), strconv.Quote(o.Model), strconv.Quote(o.Effort), strconv.Quote(filepath.Join(o.Home, "models.json")), o.ContextWindow, o.CompactLimit, strconv.Quote(strings.TrimRight(o.BaseURL, "/")+"/v1"), identity, strconv.Quote(o.AccountID), strconv.Quote(o.Channel))
-		if o.Channel == "work" {
+		if o.Channel == "work" || o.Channel == "kilo" {
 			data = strings.ReplaceAll(data, "request_max_retries = 2", "request_max_retries = 0")
 			data = strings.ReplaceAll(data, "stream_max_retries = 2", "stream_max_retries = 0")
 		}

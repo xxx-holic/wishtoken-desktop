@@ -4,7 +4,8 @@ const CANDY_PROMPT = '在一个黑色的袋子里放有三种口味的糖果，�
 function candyVerdict(text, prompt = CANDY_PROMPT) {
   if (prompt !== CANDY_PROMPT) return { verdict:'review', answer:null, reason:'题目已修改，请人工判断' };
   const plain = text.replace(/\*|`|\$/g,'').replace(/\\[()[\]]/g,'').replace(/\\(?:boxed|mathbf|textbf)\{(\d+)\}/g,'$1');
-  const conclusions = [...plain.matchAll(/(?:最终答案|答案|最少(?:需要|要|应)?(?:取出|摸出|取|摸)?|至少(?:需要|要)?(?:取出|摸出|取|摸)?)(?:是|为|应为|需要|应取|要取|取出|摸出|取|摸|\s|[:：=])*([0-9]{1,3})(?:\s*(?:颗|个|粒)|\b)/g)];
+  const conclusions = [...plain.matchAll(/(?:最终答案|答案|最少(?:需要|要|应)?(?:取出|摸出|取|摸)?|至少(?:需要|要)?(?:取出|摸出|取|摸)?)(?:是|为|应为|需要|应取|要取|取出|摸出|取|摸|\s|[:：=])*([0-9]{1,3})(?:\s*(?:颗|个|粒)|\b)/g)]
+    .filter(match => !/^\s*(?:的)?(?:圆形|五角星形?|星形)/.test(plain.slice(match.index + match[0].length)) && !/(?:圆形|五角星形?|星形)\s*$/.test(plain.slice(0,match.index)));
   if (new Set(conclusions.map(match=>Number(match[1]))).size > 1) return { verdict:'review', answer:null, reason:'回答包含多个条件下的结论，请核对原始回答' };
   let answer = conclusions.length ? Number(conclusions.at(-1)[1]) : null;
   if (answer === null && /^\s*\d{1,3}\s*(?:颗|个|粒)?[。.!！]?\s*$/.test(plain)) answer=Number(plain.match(/\d+/)[0]);
