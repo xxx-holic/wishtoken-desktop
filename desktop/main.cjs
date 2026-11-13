@@ -16,6 +16,7 @@ const { Work } = require('./lib/work.cjs');
 const { externalLink, businessCode } = require('./lib/links.cjs');
 const { loginAction, loginURL } = require('./lib/login.cjs');
 const { AutoLogin } = require('./lib/auto-login.cjs');
+const { SubscriptionBinding } = require('./lib/subscription-binding.cjs');
 const { normalizeChannel } = require('./lib/channel-name.cjs');
 
 const dataHome = process.env.GPTBRIDGE_DESKTOP_HOME || path.join(os.homedir(), '.gptbridge-desktop');
@@ -25,7 +26,7 @@ app.setPath('userData', path.join(dataHome, 'shell'));
 app.setAppUserModelId('app.gptbridge.team');
 const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
-let window, tray, service, pelican, work, autoLogin, codexApp, quitting = false, allowQuit = false;
+let window, tray, service, pelican, work, autoLogin, subscriptionBinding, codexApp, quitting = false, allowQuit = false;
 const page = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href;
 const prefsPath = path.join(dataHome, 'desktop.json');
 let prefs = {};
@@ -55,6 +56,7 @@ async function requestQuit() {
     }
   }
   await autoLogin?.close();
+  await subscriptionBinding?.close();
   await pelican?.close();
   await service?.stop();
   await work?.close();
@@ -103,6 +105,10 @@ async function handle(method, input) {
     case 'autoLoginSkip': return autoLogin.skip(input);
     case 'autoLoginOpen': return autoLogin.open(input);
     case 'autoLoginChoose': return autoLogin.choose(input);
+    case 'subscriptionBindingStart': return subscriptionBinding.start(input);
+    case 'subscriptionBindingStatus': return subscriptionBinding.snapshot(input);
+    case 'subscriptionBindingCancel': return subscriptionBinding.cancel(input);
+    case 'subscriptionBindingOpen': return subscriptionBinding.open(input);
     case 'loginStatus': return loginAction(service, 'status', input);
     case 'fenjueSubscription': return service.request(`/api/fenjue/subscription?account_id=${requireID(input)}`);
     case 'fenjueOpen': await shell.openExternal(Buffer.from("aHR0cHM6Ly9hcHAua2lsby5haS9ieW9r", "base64").toString("utf8")); return { opened:true };
@@ -280,6 +286,7 @@ if (lock) {
     work = new Work(dataHome); await work.listen();
     service = new BridgeService({ home: dataHome, binary, work });
     autoLogin = new AutoLogin({ service, home: dataHome });
+    subscriptionBinding = new SubscriptionBinding({ service, home: dataHome });
     pelican = new Pelican(dataHome, (body, signal) => service.request('/api/pelican/generate', 'POST', body, 910000, signal));
     await pelican.listen();
     const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));
