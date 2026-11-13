@@ -19,7 +19,7 @@ async function findBrowser() {
 
 // One owned browser per login. No connection to the user's daily browser or
 // research CDP, no credentials in process arguments, no persistent profile reuse.
-async function openLoginBrowser(home, signal) {
+async function openLoginBrowser(home, signal, options = {}) {
   const executable = await findBrowser();
   const parent = path.join(home, 'login-profiles');
   await fs.mkdir(parent, { recursive: true, mode: 0o700 });
@@ -40,7 +40,16 @@ async function openLoginBrowser(home, signal) {
   })();
   try {
     signal.throwIfAborted();
-    child = spawn(executable, [`--user-data-dir=${profile}`, '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-background-mode', '--password-store=basic', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+    const args = [`--user-data-dir=${profile}`, '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-background-mode', '--password-store=basic'];
+    if (options.headless) args.push('--headless=new');
+    if (options.proxy) {
+      let proxy;
+      try { proxy = new URL(options.proxy); } catch { throw new Error('浏览器备用代理地址无效，请改用协议授权。'); }
+      if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(proxy.protocol) || proxy.username || proxy.password || !proxy.hostname || !proxy.port) throw new Error('浏览器备用仅支持无认证 HTTP/SOCKS5 代理，请改用协议授权处理带认证代理。');
+      args.push(`--proxy-server=${proxy.protocol}//${proxy.host}`);
+    }
+    args.push('about:blank');
+    child = spawn(executable, args, { windowsHide: true, stdio: 'ignore' });
     let failed = false;
     child.once('error', () => { failed = true; });
     const deadline = Date.now() + 20000;

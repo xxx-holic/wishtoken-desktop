@@ -99,6 +99,17 @@ class LoginProtocol {
         if(!callback||parsed.origin!==callback.origin||parsed.pathname!==callback.pathname||parsed.searchParams.get('state')!==callback.state)throw protocolError('授权回调不匹配，未兑换凭据。','identity_mismatch');
         const r=await this.request(parsed.href);if(r.status!==200)throw protocolError('本地授权兑换未完成，请检查本地服务与登录代理。','callback_failed');return {url:parsed.href,text:r.text};
       }
+      // A web OAuth consumer can terminate on its own callback host instead
+      // of the local Codex listener.  Accept exactly the callback origin and
+      // path supplied by the caller, validate state/code, and stop there so
+      // the consumer's server-side session exchange can run in its cookie jar.
+      if(callback?.external && parsed.origin===callback.origin && parsed.pathname===callback.pathname){
+        if(callback.state && parsed.searchParams.get('state')!==callback.state)throw protocolError('授权回调状态不匹配，未继续绑定。','identity_mismatch');
+        if(!parsed.searchParams.get('code'))throw protocolError('授权回调缺少授权码，未继续绑定。','callback_failed');
+        const r=await this.request(parsed.href,{headers:{Accept:'text/html,application/json',Origin:callback.origin,Referer:callback.referer||callback.origin+'/'} });
+        if(r.status<200||r.status>=400)throw protocolError(`授权回调未完成（HTTP ${r.status}），请重试或选择浏览器备用。`,'callback_failed');
+        return {url:parsed.href,text:r.text,status:r.status,location:r.location,callback:true};
+      }
       url=authURL(parsed.href);
       const r=await this.request(url,{headers:{Accept:'text/html,application/json'}});
       if(r.location){url=new URL(r.location,url).href;continue;}
@@ -140,10 +151,10 @@ class LoginProtocol {
     // This is approval only. AutoLogin still waits for the backend's separate
     // device poll, PKCE exchange and identity-checked store before reporting ready.
   }
-  async run(login, person, select, totp) {
+  async run(login, person, select, totp, options = {}) {
     const auth=new URL(login.auth_url);
-    const redirect=login.channel==='codex'?new URL(auth.searchParams.get('redirect_uri')):null;
-    const callback=redirect?{origin:redirect.origin,pathname:redirect.pathname,state:auth.searchParams.get('state')}:null;
+    const redirect=login.channel==='codex'?new URL(auth.searchParams.get('redirect_uri')):options.callback?.origin?new URL(options.callback.origin):null;
+    const callback=redirect?{origin:redirect.origin,pathname:options.callback?.pathname||redirect.pathname,state:auth.searchParams.get('state'),external:Boolean(options.callback?.external),referer:options.callback?.referer}:null;
     this.update('protocol','正在通过协议建立登录会话…');
     let page=await this.follow(login.auth_url,callback),payload={};
     const did=(await this.http.cookies(AUTH)).find(c=>c.name==='oai-did');if(did)this.device=did.value;
@@ -178,6 +189,7 @@ class LoginProtocol {
       }else throw protocolError('遇到尚未支持的登录步骤，请选择浏览器备用继续。','unsupported_step');
       const next=nextURL(payload);if(!next)throw protocolError('登录响应没有下一步地址，协议授权已停止。','continuation_missing');
       page=await this.follow(next,callback);
+      if(page.callback)return page;
     }
     throw protocolError('协议登录步骤超出上限，已停止。','step_limit');
   }
