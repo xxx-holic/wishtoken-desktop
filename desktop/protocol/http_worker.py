@@ -1,5 +1,4 @@
 """Private stdio transport for protocol login; never persist or log request data."""
-import base64
 import json
 import sys
 from urllib.parse import urlsplit
@@ -9,10 +8,15 @@ from curl_cffi import requests
 UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.7103.113 Safari/537.36'
 session = None
 
-# The web callback host is kept as a wire descriptor so the public client does
-# not advertise the upstream/product relationship.  The authenticated peer is
-# still visible at runtime; this is branding hygiene, not encryption.
-_BINDING_HOST = base64.b64decode('YXBwLmtpbG8uYWk=').decode('ascii')
+# The web callback host is kept as an opaque wire descriptor so the public
+# client does not advertise the upstream/product relationship. The
+# authenticated peer is still visible at runtime; this is branding hygiene,
+# not encryption.
+def _wire_text(values, key=0x5A):
+    return bytes(value ^ key for value in values).decode('ascii')
+
+
+_BINDING_HOST = _wire_text([59, 42, 42, 116, 49, 51, 54, 53, 116, 59, 51])
 
 
 def destination(url):
