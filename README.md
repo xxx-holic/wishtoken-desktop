@@ -28,7 +28,7 @@ WishToken 的开源 Codex 桌面配套工具。导入你有权使用的 Team 子
 
 ## 下载和开始使用
 
-当前预览版本为 `0.9.0-fenjue-preview.1`，各平台下载及验证状态见 [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases)。新增焚诀通道已实测原始糖果题、鹈鹕动画、图片、函数工具及真实 Codex CLI 文件操作；尚无“同账号原生答错、焚诀答对”的降智恢复对照，见 [焚诀说明](docs/FENJUE_PREVIEW.md)。BPS 独立授权和子号协议导入见 [BPS 说明](docs/BPS_TRANSPORT.md)；Work 登录、API 和测试步骤见 [Work 预览说明](docs/WORK_PREVIEW.md)。
+当前预览版本为 `0.9.0-fenjue-preview.2`，各平台下载及验证状态见 [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases)。新增焚诀通道已实测原始糖果题、鹈鹕动画、图片、函数工具及真实 Codex CLI 文件操作；尚无“同账号原生答错、焚诀答对”的降智恢复对照，见 [焚诀说明](docs/FENJUE_PREVIEW.md)。BPS 独立授权和子号协议导入见 [BPS 说明](docs/BPS_TRANSPORT.md)；Work 登录、API 和测试步骤见 [Work 预览说明](docs/WORK_PREVIEW.md)。
 
 在 [Releases](https://github.com/xxx-holic/wishtoken-desktop/releases) 下载：
 
