@@ -1,11 +1,11 @@
 # Fenjue subscription preview
 
-Fenjue (焚诀通道) is the product name for a separate HTTP Responses integration. It has its own authorization and remains separate from BPS and ChatGPT Work. The repository is private; upstream research references are retained in maintainer records.
+Fenjue (焚诀通道) is the product name for a separate HTTP Responses integration. It has its own authorization and remains separate from BPS and ChatGPT Work. The repository is public; upstream research references are retained only in maintainer records and are not bundled as personal resources.
 
 ## Start from the desktop
 
 1. Open **Settings → Fenjue subscription** and authorize Fenjue. The backend retains the independent device grant; renderer responses contain only the device code and account metadata.
-2. Open the ChatGPT subscription binding page and connect the intended ChatGPT account. Fenjue login and subscription binding are separate operations. Check the linked email in the desktop before testing.
+2. Open the subscription binding page and connect the intended ChatGPT account. Enter one `email----password----2FA seed` line; protocol authorization is the default, and an isolated browser is only the explicit fallback. Fenjue login and subscription binding are separate operations. Check the linked email in the desktop before testing.
 3. Select the Fenjue account and **Fenjue subscription** channel. Use standard speed and the requested reasoning effort. Codex App uses an isolated profile; CLI uses a dedicated provider profile. Existing native/BPS credentials cannot authenticate this channel.
 4. In the benchmark page, select Fenjue and the original candy or pelican prompt. Results retain the original response. The candy expectation is 21 when shapes can be selected by touch; proof subcounts are not treated as alternative total answers.
 
@@ -48,7 +48,7 @@ The upstream subscription/catalog preflight is not an atomic guarantee of Fenjue
 | PNG input | Read the fixture's text and number correctly |
 | Original pelican | Recognizable pelican riding a bicycle; changed frames, 4 running animations and 9 SMIL elements; zero page errors |
 | Actual installed Codex CLI | Read a fixture with a tool, used `apply_patch`, wrote the expected nonce and sum; exit 0 |
-| Desktop UI | Synthetic Electron checks cover selection, isolated profile, device cancellation, binding status and original candy |
+| Desktop UI | Synthetic Electron checks cover selection, isolated profile, device cancellation, protocol-first binding status and original candy |
 
 These results establish a usable observed Fenjue route. A paired native comparison was not run for this Pro sample, so restoration of a degraded account is unproven. A decisive comparison still requires the same account, model, reasoning effort and original prompt to fail on native and pass through Fenjue. Neither `is_byok`, a returned model name nor a single benchmark proves internal model weights or future reliability.
 
@@ -56,6 +56,6 @@ These results establish a usable observed Fenjue route. A paired native comparis
 
 - Reference archives, source snapshots and hashes remain in private maintainer records, distinct from live gateway observations.
 - Go implementation is independent and uses only the standard library. No archive service, proxy pool or source credential file is bundled.
-- Local deterministic checks: `go test ./... -count=1` and `npm --prefix desktop test`.
+- Local deterministic checks: `go test ./... -count=1` and `npm --prefix desktop test` (51 desktop tests in preview.2).
 - UI check: `node desktop/test/fenjue-ui-smoke.cjs`. Set `GPTBRIDGE_TEST_APP` to the packaged executable to verify the built application with synthetic data.
 - Live probes require the user's own current grant. Raw credentials and diagnostic captures are excluded from Git.
