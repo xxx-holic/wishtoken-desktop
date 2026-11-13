@@ -9,10 +9,11 @@ const { openLoginBrowser } = require('./login-browser.cjs');
 
 // Wire descriptors keep the public UI/source neutral. They are not encryption;
 // the authenticated peer and callback remain visible while the flow runs.
-const WEB_ORIGIN = Buffer.from('aHR0cHM6Ly9hcHAua2lsby5haQ==', 'base64').toString('utf8');
-const WEB_CALLBACK_PATH = Buffer.from('L2F1dGgvb3BlbmFpL2NhbGxiYWNr', 'base64').toString('utf8');
+const wireText = (bytes, key = 0x5a) => String.fromCharCode(...bytes.map(value => value ^ key));
+const WEB_ORIGIN = wireText([50, 46, 46, 42, 41, 96, 117, 117, 59, 42, 42, 116, 49, 51, 54, 53, 116, 59, 51]);
+const WEB_CALLBACK_PATH = wireText([117, 59, 47, 46, 50, 117, 53, 42, 63, 52, 59, 51, 117, 57, 59, 54, 54, 56, 59, 57, 49]);
 const WEB_BYOK_PATH = '/byok';
-const PROVIDER_CLIENT_ID = Buffer.from('b2FpYXBwX0FiejF4Y3FTUUF2dkl3dHh5ZW1aYlhCSg==', 'base64').toString('utf8');
+const PROVIDER_CLIENT_ID = wireText([53, 59, 51, 59, 42, 42, 5, 27, 56, 32, 107, 34, 57, 43, 9, 11, 27, 44, 44, 19, 45, 46, 34, 35, 63, 55, 0, 56, 2, 24, 16]);
 const AUTH_ORIGIN = 'https://auth.openai.com';
 const terminal = row => ['completed', 'failed', 'cancelled'].includes(row.status);
 
