@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -13,6 +14,12 @@ import (
 )
 
 func (r *Router) executeFenjue(ctx context.Context, req *Request, accountID, requested string) (*Result, *Error) {
+	if r.FenjueAccess == nil {
+		return nil, apiErr(403, "feature_locked", "焚诀通道需要有效功能授权码")
+	}
+	if err := r.FenjueAccess(); err != nil {
+		return nil, apiErr(403, "feature_locked", err.Error())
+	}
 	channel := channelname.Normalize(req.Headers.Get("X-GPTBridge-Channel"))
 	if channel != "" && channel != RouteFenjue {
 		return nil, apiErr(400, "channel_conflict", "Fenjue model conflicts with the pinned channel")
@@ -55,13 +62,25 @@ func (r *Router) executeFenjue(ctx context.Context, req *Request, accountID, req
 	body["model"] = "openai/" + model
 	body["stream"] = true
 	body["store"] = false
-	raw, err := json.Marshal(body)
+	session := fenjue.ConversationKey(req.Headers, body)
+	if session == "" {
+		session = rand.Text()
+	}
+	// Reject unsupported server-side history before selecting an account or sending auth.
+	prepared, err := fenjue.PrepareRequest(body, "")
 	if err != nil {
-		return nil, apiErr(400, "invalid_json", "Invalid Fenjue request")
+		return nil, apiErr(400, "full_history_required", "Fenjue requires complete input history; previous_response_id and item_reference are unavailable")
 	}
 	acc, err := r.Pool.Pick(ctx, pool.PickOptions{AccountID: accountID, Route: RouteFenjue, Model: model})
 	if err != nil {
 		return nil, apiErr(409, "fenjue_account_required", "Select a ready Fenjue credential; ChatGPT/BPS grants cannot authenticate to Fenjue")
+	}
+	if _, exists := prepared["prompt_cache_key"]; !exists && session != "" {
+		prepared["prompt_cache_key"] = fenjue.SessionID(acc.AccountID, session)
+	}
+	raw, err := json.Marshal(prepared)
+	if err != nil {
+		return nil, apiErr(400, "invalid_json", "Invalid Fenjue request")
 	}
 	release, err := r.Pool.Acquire(ctx, acc.ID)
 	if err != nil {
@@ -79,7 +98,7 @@ func (r *Router) executeFenjue(ctx context.Context, req *Request, accountID, req
 		return nil, apiErr(status, code, message)
 	}
 	cred := fenjue.Credential{Token: acc.AccessToken, AccountID: acc.AccountID, Proxy: r.Pool.ProxyFor(acc)}
-	resp, err := r.Fenjue.Responses(ctx, cred, model, raw, SessionKey(req.Headers, body))
+	resp, err := r.Fenjue.Responses(ctx, cred, model, raw, session)
 	if err != nil {
 		if e, ok := err.(*fenjue.Error); ok {
 			return fail(e.Status, e.Code, e.Error())

@@ -18,6 +18,7 @@ const { loginAction, loginURL } = require('./lib/login.cjs');
 const { AutoLogin } = require('./lib/auto-login.cjs');
 const { SubscriptionBinding } = require('./lib/subscription-binding.cjs');
 const { normalizeChannel } = require('./lib/channel-name.cjs');
+const { requireFenjue, licenseCode } = require('./lib/feature-access.cjs');
 
 const dataHome = process.env.GPTBRIDGE_DESKTOP_HOME || path.join(os.homedir(), '.gptbridge-desktop');
 const primaryHome = mainProfile.mainHome();
@@ -88,8 +89,8 @@ async function confirmMainRestart(restore) {
 async function handle(method, input) {
   switch (method) {
     case 'snapshot': {
-      const [status, accounts, codex, models, settings] = await Promise.all(['/api/status', '/api/accounts', '/api/codex/launch', '/api/models', '/api/settings'].map(route => service.request(route)));
-      return { status, accounts: accounts.accounts, codex: { ...codex, app: codexApp, main_app: mainProfile.status(dataHome, primaryHome) }, models, settings: { proxy_url: settings.proxy_url, bps_transport: settings.bps_transport, auto_refresh: settings.auto_refresh, usage_probe: settings.usage_probe }, preferences: prefs, platform: process.platform, version: app.getVersion() };
+      const [status, accounts, codex, models, settings, feature] = await Promise.all(['/api/status', '/api/accounts', '/api/codex/launch', '/api/models', '/api/settings', '/api/features/fenjue/license'].map(route => service.request(route)));
+      return { status, features:{fenjue:feature}, accounts: accounts.accounts, codex: { ...codex, app: codexApp, main_app: mainProfile.status(dataHome, primaryHome) }, models, settings: { proxy_url: settings.proxy_url, bps_transport: settings.bps_transport, auto_refresh: settings.auto_refresh, usage_probe: settings.usage_probe }, preferences: prefs, platform: process.platform, version: app.getVersion() };
     }
     case 'importFiles': {
       const result = await dialog.showOpenDialog(window, { title: '导入账号 JSON', properties: ['openFile', 'multiSelections'], filters: [{ name: '账号 JSON', extensions: ['json'] }] });
@@ -105,13 +106,25 @@ async function handle(method, input) {
     case 'autoLoginSkip': return autoLogin.skip(input);
     case 'autoLoginOpen': return autoLogin.open(input);
     case 'autoLoginChoose': return autoLogin.choose(input);
-    case 'subscriptionBindingStart': return subscriptionBinding.start(input);
+    case 'subscriptionBindingStart': await requireFenjue(service); return subscriptionBinding.start(input);
     case 'subscriptionBindingStatus': return subscriptionBinding.snapshot(input);
     case 'subscriptionBindingCancel': return subscriptionBinding.cancel(input);
-    case 'subscriptionBindingOpen': return subscriptionBinding.open(input);
+    case 'subscriptionBindingOpen': await requireFenjue(service); return subscriptionBinding.open(input);
+    case 'featureStatus': return service.request('/api/features/fenjue/license');
+    case 'featureActivate': return service.request('/api/features/fenjue/license','POST',{code:licenseCode(input)});
+    case 'featureDeactivate': await subscriptionBinding.close(); return service.request('/api/features/fenjue/license','DELETE');
+    case 'featureCopyInstallation': {const status=await service.request('/api/features/fenjue/license');if(!status.installation)throw new Error('安装标识暂不可用');clipboard.writeText(status.installation);return true;}
+    case 'loginCopyCode': {const pending=await loginAction(service,'status',input);if(!pending.active||pending.done||!pending.user_code)throw new Error('设备码已失效，请重新授权');clipboard.writeText(pending.user_code);return true;}
     case 'loginStatus': return loginAction(service, 'status', input);
     case 'fenjueSubscription': return service.request(`/api/fenjue/subscription?account_id=${requireID(input)}`);
-    case 'fenjueOpen': await shell.openExternal(Buffer.from("aHR0cHM6Ly9hcHAua2lsby5haS9ieW9r", "base64").toString("utf8")); return { opened:true };
+    case 'bpsNativeStatus': return service.request(`/api/bps-native/status?account_id=${requireID(input)}`);
+    case 'bpsNativeCancel': return service.request('/api/bps-native/cancel', 'POST', {account_id: requireID(input)});
+    case 'bpsNativeStart': {
+      const account_id = requireID(input?.account_id), bps_account_id = requireID(input?.bps_account_id);
+      if (!Number.isSafeInteger(input.total_requests) || input.total_requests < 1 || input.total_requests > 100) throw new Error('预热总数须为 1–100');
+      return service.request('/api/bps-native/start', 'POST', {account_id, bps_account_id, total_requests:input.total_requests, restart:input.restart === true});
+    }
+    case 'fenjueOpen': await requireFenjue(service); await shell.openExternal(Buffer.from("aHR0cHM6Ly9hcHAua2lsby5haS9ieW9r", "base64").toString("utf8")); return { opened:true };
     case 'loginCancel': return loginAction(service, 'cancel', input);
     case 'loginOpen': {
       const pending = await loginAction(service, 'status', input);
@@ -214,6 +227,7 @@ async function handle(method, input) {
     }
     case 'pelicanHistory': return { batches: pelican.snapshot(), default_prompt: DEFAULT_PROMPT, candy_prompt:CANDY_PROMPT };
     case 'pelicanStart': {
+      if(normalizeChannel(input?.channel)==='fenjue')await requireFenjue(service);
       const { accounts } = await service.request('/api/accounts');
       return pelican.start(input, accounts);
     }

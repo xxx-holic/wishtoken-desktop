@@ -10,11 +10,12 @@ const root=path.resolve(__dirname,'../..');
  try{
   const page=await client.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await expect(page.locator('#service-label')).toHaveText('本地服务运行中');
-  await client.evaluate(({app})=>{
+  await client.evaluate(({app,shell})=>{
    const require=process.mainModule.require.bind(process.mainModule),path=require('node:path');
    const {BridgeService}=require(path.join(app.getAppPath(),'lib/service.cjs')),{AutoLogin}=require(path.join(app.getAppPath(),'lib/auto-login.cjs'));
    const original=BridgeService.prototype.request,start=AutoLogin.prototype.start;
    const f=globalThis.autoFixture={session:100,approved:false,saved:false,closed:0,browserCalls:0,cancelled:0,steps:[]};
+   f.opened=[];shell.openExternal=async url=>{f.opened.push(url);};
    BridgeService.prototype.request=async function(route,method,body,...rest){
     if(route==='/api/login/start'){
      f.session++;f.email=body.expected_email;f.channel=body.channel;f.approved=false;f.saved=false;
@@ -41,7 +42,7 @@ const root=path.resolve(__dirname,'../..');
      if(p==='/backend-api/sentinel/req')return json({token:'synthetic-challenge',proofofwork:{required:false}});
      if(p==='/api/accounts/authorize/continue')return json({continue_url:'/log-in/password'});
      if(p==='/api/accounts/password/verify')return JSON.parse(options.body).password==='bad-fixture'?{status:401,text:'{"error":{"code":"incorrect_password"}}'}:json({continue_url:'/workspace','oai-client-auth-session':{workspaces:[{id:'personal',title:'Personal'},{id:'fixture-team',title:'Example Team'}]}});
-     if(p==='/api/accounts/workspace/select')return json({continue_url:'/basispoints/deviceauth/callback?code=fixture&state=fixture'});
+     if(p==='/api/accounts/workspace/select')return f.email==='device-disabled@example.test'?{status:403,text:'{"error":{"code":"deviceauth_disabled","message":"private-upstream-text"}}'}:json({continue_url:'/basispoints/deviceauth/callback?code=fixture&state=fixture'});
      if(p==='/api/accounts/deviceauth/authorize_code'){f.approved=true;return json({status:'success'});}
      return {status:200,text:'<html>synthetic page</html>'};
     }});
@@ -77,11 +78,19 @@ const root=path.resolve(__dirname,'../..');
   await page.locator('#login-account').click();await page.locator('#auto-login-channel').selectOption('bps');await page.locator('#auto-login-input').fill('cancel@example.test----correct-fixture----');await page.locator('#auto-login-start').click();
   await expect(page.locator('[data-auth-choice="fixture-team"]')).toBeVisible();await page.keyboard.press('Escape');
   await expect.poll(()=>client.evaluate(()=>globalThis.autoFixture.closed)).toBe(3);
+  await page.locator('#login-account').click();await page.locator('#auto-login-channel').selectOption('bps');
+  await page.locator('#auto-login-input').fill('device-disabled@example.test----correct-fixture----');await page.locator('#auto-login-start').click();
+  await expect(page.locator('[data-auth-choice="fixture-team"]')).toBeVisible();await page.locator('[data-auth-choice="fixture-team"]').click();
+  await expect(page.locator('.login-queue-row')).toHaveAttribute('data-status','failed');
+  await expect(page.locator('.login-queue-row')).toContainText('设备代码');
+  await page.locator('.login-queue-row [data-auth-help="chatgptSecurity"]').click();
+  const opened=await client.evaluate(()=>globalThis.autoFixture.opened);if(opened.at(-1)!=='https://chatgpt.com/settings/security')throw Error('Wrong auth recovery destination');
+  if((await page.locator('#modal').innerText()).includes('private-upstream-text'))throw Error('Raw upstream error leaked');
   if(errors.length)throw Error(errors.join('\n'));
   console.log(JSON.stringify({ok:true,synthetic:true,defaultProtocol:true,batchPartialSuccess:true,explicitWorkspace:true,maskedInput:true,clearedInput:true,selectSavedAccount:true,cancelCleanup:true,browserCalls:0,rendererErrors:0}));
  }finally{
   const {BridgeService}=require('../lib/service.cjs'),svc=new BridgeService({home,binary:''});svc.config=JSON.parse(await fs.readFile(path.join(home,'config.json'),'utf8'));await svc.stop();
-  if(process.platform==='win32')require('node:child_process').execFileSync('taskkill.exe',['/PID',String(client.process().pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else client.process().kill('SIGKILL');
+  require('./feature-license-fixture.cjs').stopFixtureProcess(client);
   await fs.rm(home,{recursive:true,force:true,maxRetries:8,retryDelay:250});
  }
 })().catch(e=>{console.error(e);process.exitCode=1;});

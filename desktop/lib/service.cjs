@@ -53,6 +53,13 @@ class BridgeService {
       return status.desktop_mode === true && path.resolve(status.home) === this.home && (!this.work || status.work_bridge_id === crypto.createHash('sha256').update(this.work.key).digest('hex'));
     } catch { return false; }
   }
+  // Main-process only: never return proxy credentials through renderer IPC.
+  async accountProxy(accountID) {
+    const stored = JSON.parse(await fsp.readFile(path.join(this.home, 'accounts.json'), 'utf8'));
+    const selected = stored.accounts?.find(account => account.id === accountID);
+    if (!selected || selected.provider !== 'fenjue') throw new Error('请选择有效的焚诀账号。');
+    return selected.proxy_url?.trim() || this.config?.proxy_url || '';
+  }
   async start() {
     if (this.starting) return this.starting;
     this.starting = this.startInner();

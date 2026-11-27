@@ -62,7 +62,7 @@ func (s *Server) adminPelican(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 400, "invalid_channel", "invalid_request_error", channelErr.Error())
 		return
 	}
-	if (channel == "bps" && !s.Config().BPSModelAllowed(req.Model)) || (channel == "codex" && !localcodex.NativeModelAllowed(req.Model)) || (channel == "work" && !localcodex.WorkModelAllowed(req.Model)) {
+	if (channel == "bps" && !s.Config().BPSModelAllowed(req.Model)) || ((channel == "codex" || channel == "bps_native") && !localcodex.NativeModelAllowed(req.Model)) || (channel == "work" && !localcodex.WorkModelAllowed(req.Model)) {
 		writeError(w, r, 400, "model_unavailable", "invalid_request_error", "模型不在所选通道列表中")
 		return
 	}

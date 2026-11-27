@@ -27,6 +27,9 @@ func fenjueLoginView(login *fenjueLogin) object {
 }
 
 func (s *Server) adminFenjue(w http.ResponseWriter, r *http.Request, path string) {
+	if path != "/fenjue/login/cancel" && !s.requireFenjue(w, r) {
+		return
+	}
 	if path == "/fenjue/subscription" && r.Method == "GET" {
 		a, ok := s.Store.Get(r.URL.Query().Get("account_id"))
 		if !ok || a.Provider != "fenjue" {
@@ -127,6 +130,13 @@ func (s *Server) adminFenjue(w http.ResponseWriter, r *http.Request, path string
 		return
 	}
 	if grant.Status == "approved" {
+		if s.featureLicense.Require() != nil {
+			login.Done = true
+			login.Device.Secret = ""
+			login.Cancel()
+			writeError(w, r, 403, "feature_locked", "permission_error", "功能授权已失效，未保存登录凭据")
+			return
+		}
 		a := account.Account{Provider: "fenjue", AccessToken: grant.Token, AccountID: grant.UserID, Email: grant.Email, Source: "fenjue-device-login"}
 		a.FillFromTokens()
 		stored, saveErr := s.Store.Upsert(a)

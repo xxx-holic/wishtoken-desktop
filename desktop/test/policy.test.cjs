@@ -18,6 +18,7 @@ test('launch cannot select arbitrary homes or prepare-only from renderer', () =>
   assert.throws(() => cleanLaunch({ ...request, speed: 'fast' }));
   assert.throws(() => cleanLaunch({ ...request, channel: 'codex', speed: 'ultrafast' }));
   assert.equal(cleanLaunch({ ...request, channel: 'codex' }).channel, 'codex');
+  assert.equal(cleanLaunch({ ...request, channel: 'bps_native', speed:'fast' }).channel, 'bps_native');
   assert.throws(() => cleanLaunch({ ...request, channel: 'automatic' }));
   assert.equal(result.home, undefined);
   assert.equal(result.prepare_only, undefined);

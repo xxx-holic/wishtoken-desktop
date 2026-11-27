@@ -147,7 +147,7 @@ func bpsPost(ctx context.Context, client *http.Client, path, contentType string,
 			code = nested.Code
 		}
 		switch code {
-		case "invalid_grant", "invalid_client", "invalid_request", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "authorization_pending", "deviceauth_authorization_pending", "slow_down", "expired_token", "server_error", "temporarily_unavailable":
+		case "invalid_grant", "invalid_client", "invalid_request", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "authorization_pending", "deviceauth_authorization_pending", "deviceauth_disabled", "auth_page_conflict", "slow_down", "expired_token", "server_error", "temporarily_unavailable":
 		default:
 			code = ""
 		}

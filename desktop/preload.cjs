@@ -6,6 +6,11 @@ const invoke = (method, data) => ipcRenderer.invoke('gptbridge', method, data).t
 });
 contextBridge.exposeInMainWorld('bridge', Object.freeze({
   snapshot: () => invoke('snapshot'),
+  featureStatus: () => invoke('featureStatus'),
+  featureActivate: code => invoke('featureActivate',code),
+  featureDeactivate: () => invoke('featureDeactivate'),
+  featureCopyInstallation: () => invoke('featureCopyInstallation'),
+  loginCopyCode: session => invoke('loginCopyCode',session),
   importFiles: () => invoke('importFiles'),
   importText: text => invoke('importText', text),
   loginStart: channel => invoke('loginStart', channel),
@@ -14,6 +19,9 @@ contextBridge.exposeInMainWorld('bridge', Object.freeze({
   loginOpen: session => invoke('loginOpen', session),
   fenjueSubscription: id => invoke('fenjueSubscription', id),
   fenjueOpen: () => invoke('fenjueOpen'),
+  bpsNativeStatus: id => invoke('bpsNativeStatus', id),
+  bpsNativeStart: data => invoke('bpsNativeStart', data),
+  bpsNativeCancel: id => invoke('bpsNativeCancel', id),
   autoLoginStart: input => invoke('autoLoginStart', input),
   autoLoginStatus: id => invoke('autoLoginStatus', id),
   autoLoginCancel: id => invoke('autoLoginCancel', id),

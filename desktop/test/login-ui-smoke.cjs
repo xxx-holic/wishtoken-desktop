@@ -37,14 +37,20 @@ const root=path.resolve(__dirname,'../..');
   await expect.poll(()=>client.evaluate(()=>globalThis.loginFixture.opened.length)).toBe(2);
   await page.keyboard.press('Escape');await expect.poll(()=>client.evaluate(()=>globalThis.loginFixture.cancelled)).toBe(2);
   await page.locator('#login-account').click();await page.locator('#login-manual').click();await page.locator('#login-bps').click();await expect.poll(()=>client.evaluate(()=>globalThis.loginFixture.opened.length)).toBe(3);
-  await client.evaluate(()=>{globalThis.loginFixture.ready=true;});await expect(page.locator('#modal')).not.toBeVisible();
-  await expect(page.locator('.account-card')).toHaveCount(1);await expect(page.locator('.card-health')).toContainText('BPS 授权');
+  await client.evaluate(()=>{globalThis.loginFixture.ready=true;});await expect(page.locator('#bps-saved-close')).toBeVisible();await page.locator('#bps-saved-close').click();await expect(page.locator('#modal')).not.toBeVisible();
+   await expect(page.locator('.account-card')).toHaveCount(1);await expect(page.locator('.card-health')).toContainText('BPS 授权');
+   await page.locator('#grant-filter').selectOption('bps');await expect(page.locator('.account-card')).toHaveCount(1);
+   await expect(page.locator('#account-result-count')).toHaveText('显示 1 / 1 条授权记录');
+   await page.locator('#grant-filter').selectOption('codex');await expect(page.locator('.account-card')).toHaveCount(0);
+   await expect(page.locator('#account-result-count')).toHaveText('显示 0 / 1 条授权记录');
+   await page.locator('#clear-account-filters').click();await expect(page.locator('.account-card')).toHaveCount(1);
+   await expect(page.locator('#grant-filter')).toHaveValue('all');await expect(page.locator('#clear-account-filters')).toBeHidden();
   const snapshot=await page.evaluate(()=>window.bridge.snapshot());if(snapshot.accounts.some(a=>'access_token'in a||'refresh_token'in a||'id_token'in a))throw Error('Credentials exposed to renderer');
   await page.locator('[data-page=pelican]').click();await expect(page.locator('#pelican-accounts')).toContainText('BPS 授权');
   if(errors.length)throw Error(errors.join('\n'));
   console.log(JSON.stringify({ok:true,synthetic:true,deviceCode:true,browserAllowlist:true,cancelAndEscape:true,autoImport:true,grantLabel:true,rendererErrors:0}));
  }finally{
   const {BridgeService}=require('../lib/service.cjs'),svc=new BridgeService({home,binary:''});svc.config=JSON.parse(await fs.readFile(path.join(home,'config.json'),'utf8'));await svc.stop();
-  if(process.platform==='win32')require('node:child_process').execFileSync('taskkill.exe',['/PID',String(client.process().pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else client.process().kill('SIGKILL');
+  require('./feature-license-fixture.cjs').stopFixtureProcess(client);
  }
 })().catch(e=>{console.error(e);process.exitCode=1;});

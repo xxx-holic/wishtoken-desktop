@@ -12,6 +12,7 @@ function loginDialog() {
       <label class="field-label" for="auto-login-mode">导入方式</label>
       <select class="full" id="auto-login-mode"><option value="protocol">协议授权（首选，不打开浏览器）</option><option value="browser">浏览器自动授权（备用）</option></select>
       <p class="login-hint">每个账号使用独立会话，成功后自动入库。协议失败时显示具体步骤，由你决定是否改用浏览器。</p>
+      <div id="auto-device-help" class="auth-help" hidden><strong>先开启设备码登录</strong><p>BPS 授权需要在 ChatGPT 安全设置中开启设备码登录。开启后回到这里继续，无需重新导入原生凭据。</p><button id="auto-device-settings" class="secondary">打开 ChatGPT 安全设置</button></div>
       <div class="login-input-label"><label class="field-label" for="auto-login-input">子号资料 · 每行一个，最多 50 个</label><label><input type="checkbox" id="auto-login-reveal"> 显示输入</label></div>
       <textarea id="auto-login-input" class="login-secret" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="auto-login-format" placeholder="在此粘贴子号资料"></textarea>
       <p id="auto-login-format" class="login-hint">格式：<code>邮箱----密码----2FA种子</code><br>未开启 2FA 时，保留末尾分隔符并留空。密码与种子仅用于本次授权，任务结束即从内存释放。</p>
@@ -27,6 +28,8 @@ function loginDialog() {
   $('login-manual').onclick = () => { $('auto-login-input').value = ''; autoLoginGeneration++; manualLoginDialog(); };
   $('auto-login-reveal').onchange = () => $('auto-login-input').classList.toggle('login-secret', !$('auto-login-reveal').checked);
   $('auto-login-close').onclick = closeModal;
+  $('auto-login-channel').onchange = () => { $('auto-device-help').hidden = $('auto-login-channel').value !== 'bps'; };
+  $('auto-device-settings').onclick = () => action('auto-device-settings', () => api.openLink('chatgptSecurity'));
   $('auto-login-open').onclick = () => action('auto-login-open', () => api.autoLoginOpen(autoLoginID));
   $('auto-login-skip').onclick = () => action('auto-login-skip', () => api.autoLoginSkip(autoLoginID));
   $('auto-login-start').onclick = async () => {
@@ -59,6 +62,8 @@ function loginDialog() {
     }
   };
   $('auto-login-rows').onclick = event => {
+    const help = event.target.closest('[data-auth-help]');
+    if (help?.dataset.authHelp === 'chatgptSecurity') void api.openLink('chatgptSecurity');
     const choose = event.target.closest('[data-auth-choice]');
     if (choose) void action('auto-login-choice', () => api.autoLoginChoose({ id: autoLoginID, index: Number(choose.dataset.index), choice: choose.dataset.authChoice }));
     const use = event.target.closest('[data-auth-use]');
@@ -81,8 +86,15 @@ function renderLoginProgress(batch) {
   $('auto-login-open').hidden = batch.done || batch.mode !== 'browser'; $('auto-login-skip').hidden = batch.done;
   $('login-manual').disabled = !batch.done;
   const html = batch.rows.map(row => `<li class="login-queue-row" data-status="${esc(row.status)}"><div class="login-row-heading"><strong>${esc(row.email)}</strong><span class="login-state">${authStateText[row.status]}</span></div><p>${esc(row.message)}</p>${row.workspace ? `<small>工作区：${esc(row.workspace)}</small>` : ''}${row.cleanup_warning ? `<p class="danger-text">${esc(row.cleanup_warning)}</p>` : ''}${row.choices?.length ? `<div class="login-workspaces" aria-label="选择工作区">${row.choices.map(c => `<button class="secondary" data-index="${row.index}" data-auth-choice="${esc(c.id)}">${esc(c.label)}</button>`).join('')}</div>` : ''}${batch.done && row.account_id ? `<button class="secondary login-use" data-auth-use="${esc(row.account_id)}" data-channel="${esc(batch.channel)}">使用此账号 · ${batch.channel === 'bps' ? 'BPS' : '原生'}</button>` : ''}</li>`).join('');
+  const renderKey = html + JSON.stringify(batch.rows.map(row => row.help_action || ''));
   // Preserve keyboard focus while polling an unchanged workspace choice.
-  if ($('auto-login-rows').dataset.html !== html) { $('auto-login-rows').innerHTML = html; $('auto-login-rows').dataset.html = html; }
+  if ($('auto-login-rows').dataset.html !== renderKey) {
+    $('auto-login-rows').innerHTML = html; $('auto-login-rows').dataset.html = renderKey;
+    batch.rows.forEach((row, index) => { if (row.help_action === 'chatgptSecurity') {
+      const button = document.createElement('button'); button.className = 'secondary'; button.dataset.authHelp = 'chatgptSecurity'; button.textContent = '打开 ChatGPT 安全设置';
+      $('auto-login-rows').children[index].append(button);
+    } });
+  }
 }
 $('modal').addEventListener('close', () => {
   autoLoginGeneration++; clearTimeout(autoLoginTimer);

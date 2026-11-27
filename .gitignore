@@ -17,6 +17,8 @@ sub2api-rotation-*.json
 *.key
 .env
 .env.*
+# Private account-import inputs kept locally by the owner
+/oss*.txt
 
 # Reproducible outputs belong in Releases, not Git
 /build/

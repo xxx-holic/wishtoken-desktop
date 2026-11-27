@@ -34,7 +34,7 @@ func Channel(value string) (string, error) {
 	if value == "" {
 		return "bps", nil
 	}
-	if value != "bps" && value != "codex" && value != "work" && value != "prism" && value != "fenjue" {
+	if value != "bps" && value != "codex" && value != "bps_native" && value != "work" && value != "prism" && value != "fenjue" {
 		return "", fmt.Errorf("请选择 BPS、原生、Fenjue、Work 或 Prism 通道")
 	}
 	return value, nil
@@ -180,7 +180,7 @@ func ChannelCatalog(channel string) []byte {
 	if channel == "prism" {
 		return append([]byte(nil), prismCatalog...)
 	}
-	if channel == "codex" {
+	if channel == "codex" || channel == "bps_native" {
 		return append([]byte(nil), nativeCatalog...)
 	}
 	return Catalog()

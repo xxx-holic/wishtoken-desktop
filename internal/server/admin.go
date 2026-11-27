@@ -115,9 +115,18 @@ func (l *recordLog) list(limit int) []router.Record {
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	path := channelname.AdminPath(strings.TrimPrefix(r.URL.Path, "/api"))
 	switch {
+	case path == "/features/fenjue/license":
+		s.adminFeatureLicense(w, r)
+	case strings.HasPrefix(path, "/bps-native/"):
+		s.adminBPSNative(w, r, path)
 	case strings.HasPrefix(path, "/fenjue/"):
 		s.adminFenjue(w, r, path)
 	case path == "/shutdown" && r.Method == http.MethodPost:
+		s.bpsNativeMu.Lock()
+		if s.bpsNativeCancel != nil {
+			s.bpsNativeCancel()
+		}
+		s.bpsNativeMu.Unlock()
 		api.WriteJSON(w, http.StatusOK, object{"ok": true})
 		s.stopMu.Lock()
 		if s.stop != nil {
@@ -270,6 +279,13 @@ func (s *Server) importAccounts(res *account.ImportResult, refresh bool) importS
 		summary.Warnings = []string{}
 	}
 	for _, acc := range res.Accounts {
+		if acc.Provider == "fenjue" {
+			if err := s.featureLicense.Require(); err != nil {
+				summary.Skipped++
+				summary.Warnings = append(summary.Warnings, err.Error())
+				continue
+			}
+		}
 		up, err := s.Store.Upsert(acc)
 		if err != nil {
 			summary.Warnings = append(summary.Warnings, err.Error())
@@ -363,6 +379,11 @@ func (s *Server) adminImport(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, r, http.StatusBadRequest, "no_accounts_found", "invalid_request_error", msg)
 		return
+	}
+	for _, a := range merged.Accounts {
+		if a.Provider == "fenjue" && !s.requireFenjue(w, r) {
+			return
+		}
 	}
 	api.WriteJSON(w, http.StatusOK, s.importAccounts(merged, refresh))
 }
@@ -780,7 +801,7 @@ func (s *Server) adminTest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	start := time.Now()
 	headers := http.Header{}
-	if req.Route == "work" || req.Route == "fenjue" {
+	if req.Route == "work" || req.Route == "fenjue" || req.Route == "bps_native" {
 		headers.Set("X-GPTBridge-Channel", req.Route)
 	}
 	if req.AccountID != "" {

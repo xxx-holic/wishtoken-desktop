@@ -1,5 +1,6 @@
 'use strict';
 const LINKS = Object.freeze({
+  chatgptSecurity: 'https://chatgpt.com/settings/security',
   website: 'https://wishtoapp.com/',
   shop: 'https://wishtoken.team/',
   liandong: 'https://wzyp.cn/shop/6YHGJOPN',

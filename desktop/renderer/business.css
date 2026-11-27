@@ -19,13 +19,17 @@
 .business-note { margin-top: 12px; font-size: 12px; }
 html[data-theme=dark] .business-page { --business-muted: #aabbd3; }
 .sidebar { overflow-y: auto; }
+@media (max-height: 1000px) {
+  .sidebar-note { display: none; }
+  .sidebar footer { margin-top: auto; }
+}
 @media (max-height: 800px) {
   .sidebar { padding-top: 20px; padding-bottom: 20px; }
   .sidebar .brand { margin-bottom: 22px; }
-  .sidebar .nav-item { padding-top: 10px; padding-bottom: 10px; }
-  .sidebar .community-links { gap: 4px; margin: 14px 0 8px; padding-top: 12px; }
+  .sidebar .nav-item { padding-top: 9px; padding-bottom: 9px; }
+  .sidebar .community-links { gap: 4px; margin: 10px 0 8px; padding-top: 12px; }
   .sidebar-note { display: none; }
-  .sidebar footer { margin-top: auto; }
+  .sidebar footer { margin-top: auto; padding-top: 14px; }
 }
 @media (max-width: 1050px) {
   .business-row, .business-partners { grid-template-columns: minmax(0, 1fr) 175px; gap: 20px; }
