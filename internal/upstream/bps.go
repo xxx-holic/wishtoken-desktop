@@ -21,7 +21,29 @@ type BPSClient struct {
 	Transport string
 	// ResponsesURL / AttachmentsURL override the defaults (tests).
 	ResponsesURL   string
+	AccessURL      string
 	AttachmentsURL string
+}
+
+// ModelAccess uses the same credential and proxy as the subsequent BPS calls.
+func (c *BPSClient) ModelAccess(ctx context.Context, cred Credentials) (*http.Response, error) {
+	target := c.AccessURL
+	if target == "" {
+		target = basispoints.ResponsesURL + "/access?include_models=true"
+	}
+	hc, err := client(cred, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	copy := *hc
+	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	ApplyBPSHeaders(req, cred)
+	req.Header.Set("Accept", "application/json")
+	return copy.Do(req)
 }
 
 func (c *BPSClient) responsesURL() string {

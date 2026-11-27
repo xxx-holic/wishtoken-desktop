@@ -141,7 +141,7 @@ function mergeConfig(original, prepared, home, key, accountID, channel) {
   Object.assign(values, {model_provider:JSON.stringify(provider), model_catalog_json:JSON.stringify(path.join(home,'wishtoken-models.json')), cli_auth_credentials_store:'"file"'});
   if (provider === 'openai') {
     const base = source.statements.find(s => s.section[0] === 'model_providers' && s.section[1] === 'gptbridge' && s.key === 'base_url');
-    if (!base || !/^acc-[A-Za-z0-9-]+$/.test(accountID || '') || !['bps','codex','work'].includes(channel)) throw new Error('主应用本地通道信息不完整');
+    if (!base || !/^acc-[A-Za-z0-9-]+$/.test(accountID || '') || !['bps','codex','bps_native','work'].includes(channel)) throw new Error('主应用本地通道信息不完整');
     const url = new URL(scalar(base.value));
     if (url.protocol !== 'http:' || !['127.0.0.1','localhost','[::1]'].includes(url.hostname)) throw new Error('主应用模型入口必须是本地服务');
     const scope = createHmac('sha256',key).update('desktop-api\n'+accountID+'\n'+channel).digest('hex');

@@ -35,6 +35,9 @@ func TestSubscriptionPreflightAndNoReplay(t *testing.T) {
 					fmt.Fprintf(w, `{"data":[{"id":"openai/gpt-6-astra","hasUserByokAvailable":%t}]}`, tc.byok)
 				case "/responses":
 					posts.Add(1)
+					if r.Header.Get("User-Agent") != wireValue("S2lsby1Db2RlLzcuOC4yNyBhaS1zZGsvcHJvdmlkZXItdXRpbHMvNC4wLjQwIHJ1bnRpbWUvYnVuLzEuNC40") || r.Header.Get(wireValue("eC1raWxvY29kZS1tb2Rl")) != "code" || r.Header.Get(wireValue("WC1LSUxPQ09ERS1FRElUT1JOQU1F")) == "" {
+						t.Error("request profile incomplete")
+					}
 					body, _ := io.ReadAll(r.Body)
 					if string(body) != `{"model":"openai/gpt-6-astra","input":"hi"}` {
 						t.Error("body mutated")
@@ -114,5 +117,31 @@ func TestDeviceProtocolAndRedirection(t *testing.T) {
 	_, err = c.Status(context.Background(), Credential{Token: "synthetic-fenjue-credential"})
 	if err == nil || hits.Load() != 0 {
 		t.Fatal("redirect forwarded credentials")
+	}
+}
+
+func TestSubscriptionCooldownPreservesCredentialAndStopsBeforeGeneration(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/api/trpc/openAiChatGpt.status" {
+			t.Error("unexpected generation or catalog request")
+		}
+		fmt.Fprint(w, `{"result":{"data":{"state":"error","email":"fixture@example.test","errorMessage":"OpenAI doesn't allow this ChatGPT account or workspace to share its plan. Connect a different ChatGPT account; until then, requests use credits."}}}`)
+	}))
+	defer srv.Close()
+	c := Client{APIURL: srv.URL, GatewayURL: srv.URL}
+	cred := Credential{Token: "synthetic-independent-credential", AccountID: "fixture"}
+	status, err := c.Status(context.Background(), cred)
+	if err != nil || status.Reason != "subscription_cooldown" {
+		t.Fatalf("status: %+v, %v", status, err)
+	}
+	_, err = c.Responses(context.Background(), cred, "gpt-6-astra", []byte(`{"input":"hi"}`), "fixture")
+	e, ok := err.(*Error)
+	if !ok || e.Code != "subscription_cooldown" || e.Status != 409 || calls.Load() != 2 {
+		t.Fatalf("unexpected result: %v; calls %d", err, calls.Load())
+	}
+	if cred.Token != "synthetic-independent-credential" {
+		t.Fatal("credential changed")
 	}
 }

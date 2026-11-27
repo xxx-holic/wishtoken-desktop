@@ -46,8 +46,9 @@ type stickyEntry struct {
 
 // Pool wraps the account store with scheduling state.
 type Pool struct {
-	store *account.Store
-	cfg   func() *config.Config
+	MaintenancePaused func(string) bool
+	store             *account.Store
+	cfg               func() *config.Config
 
 	mu        sync.Mutex
 	cooldowns map[string]cooldown
@@ -414,6 +415,9 @@ func (p *Pool) RunMaintenance(ctx context.Context, identity upstream.Identity) {
 		}
 		cfg := p.cfg()
 		for _, acc := range p.store.List() {
+			if p.MaintenancePaused != nil && p.MaintenancePaused(acc.ID) {
+				continue
+			}
 			if acc.Provider == "fenjue" {
 				continue
 			}
@@ -435,6 +439,9 @@ func (p *Pool) RunMaintenance(ctx context.Context, identity upstream.Identity) {
 
 // ProbeUsage refreshes the usage snapshot of account id.
 func (p *Pool) ProbeUsage(ctx context.Context, id string, identity upstream.Identity) (*account.Usage, error) {
+	if p.MaintenancePaused != nil && p.MaintenancePaused(id) {
+		return nil, errors.New("BPS 预热中，已暂停该账号的额度探针")
+	}
 	if a, ok := p.store.Get(id); ok && a.Provider == "fenjue" {
 		return nil, errors.New("Fenjue subscription usage is available in the linked ChatGPT usage page")
 	}

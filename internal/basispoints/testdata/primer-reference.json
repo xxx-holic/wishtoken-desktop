@@ -1,0 +1,1 @@
+{"input":[{"content":[{"text":"hi","type":"input_text"}],"role":"user","type":"message"}],"metadata":{"agent_iteration":"1","task_id":"dd26134c-f418-54ef-bf31-0c83931d26ec","turn_id":"21a4a396-045e-543a-a973-ccb0170d9919"},"model":"gpt-6-astra","model_selection":"explicit","reasoning_effort":"low","store":false,"stream":true}

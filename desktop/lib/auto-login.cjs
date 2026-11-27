@@ -5,6 +5,7 @@ const { loginURL } = require('./login.cjs');
 const { openLoginBrowser } = require('./login-browser.cjs');
 const { LoginProtocol } = require('./login-protocol.cjs');
 const { createCurlHTTP } = require('./login-curl.cjs');
+const { loginProblem, watchAuthFailures } = require('./login-errors.cjs');
 
 const MAX_ACCOUNTS = 50;
 function secretBytes(seed) {
@@ -54,7 +55,7 @@ async function inspectPage(page) {
     const failure = /incorrect|invalid|wrong|错误|不正确|无效/i.test(errors) ? 'invalid' : /too many|rate limit|过多|频繁/i.test(text) ? 'rate_limit' : '';
     const radios = Array.from(document.querySelectorAll('input[name="workspace_id"]'));
     const choices = radios.map((el, index) => ({ id: el.value, index, label: (el.closest('label')?.innerText || el.labels?.[0]?.innerText || `工作区 ${index + 1}`).trim().slice(0, 160) }));
-    const buttons = location.pathname === '/workspace' ? Array.from(document.querySelectorAll('button')).filter(visible).filter(el => !/log out|sign out|退出/i.test(el.innerText)).map((el, index) => ({ id: String(index), index, label: (el.innerText || '').trim().slice(0, 160) })).filter(x => x.label) : [];
+    const buttons = location.pathname === '/workspace' ? Array.from(document.querySelectorAll('button[name="workspace_id"]')).filter(visible).map((el, index) => ({ id: el.value, index, label: (el.innerText || '').trim().slice(0, 160) })).filter(x => x.id && x.label) : [];
     return { failure, choices: choices.length ? choices : buttons, kind: radios.length ? 'radio' : 'button', phone: location.pathname.includes('add-phone'), challenge: !!document.querySelector('iframe[src*="captcha"], iframe[src*="challenges.cloudflare"], input[name="cf-turnstile-response"]') };
   });
 }
@@ -116,7 +117,7 @@ class AutoLogin {
         if (batch.controller.signal.aborted) { row.status = 'cancelled'; row.message = '已取消'; person.password = person.seed = ''; continue; }
         batch.itemController = new AbortController();
         const signal = AbortSignal.any([batch.controller.signal, batch.itemController.signal]);
-        let owned, login, http;
+        let owned, login, http, authWatch;
         const abortBrowser = () => { void owned?.close().catch(() => {}); };
         const update = (stage, message, status = 'running') => Object.assign(row, { stage, message, status });
         try {
@@ -135,8 +136,9 @@ class AutoLogin {
           signal.throwIfAborted();
           loginURL(login);
           if (batch.mode === 'browser') {
+            authWatch = watchAuthFailures(owned.page);
             await owned.page.goto(login.auth_url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-            await this.drive(batch, row, person, login, owned.page, update, signal);
+            await this.drive(batch, row, person, login, owned.page, update, signal, authWatch);
           } else {
             const protocol = new LoginProtocol(http, signal, update);
             await protocol.run(login, person, async choices => {
@@ -165,9 +167,12 @@ class AutoLogin {
           }
         } catch (error) {
           row.status = signal.aborted ? 'cancelled' : 'failed';
+          const problem = loginProblem(error.loginCode);
+          if (problem && !signal.aborted) { row.error_code = problem.code; row.help_action = problem.action; }
           row.message = signal.aborted ? (batch.controller.signal.aborted ? '已取消' : '已跳过') : error.loginMessage || (['browser', 'starting'].includes(row.stage) ? '无法创建授权，请检查 Chrome / Edge、本地服务和网络；已有授权须先结束。' : '授权未完成，请重新尝试或改用手动浏览器授权。');
           // Never serialize a Playwright exception: it can include filled secrets.
         } finally {
+          authWatch?.dispose();
           signal.removeEventListener('abort', abortBrowser);
           person.password = person.seed = '';
           row.choices = []; batch.selection = null; batch.page = null;
@@ -182,13 +187,14 @@ class AutoLogin {
       batch.done = true;
     }
   }
-  async drive(batch, row, person, login, page, update, signal) {
+  async drive(batch, row, person, login, page, update, signal, authWatch) {
     const deadline = this.now() + this.timeout;
     const performed = new Set(); let mfaAttempts = 0, lastCounter = -1, lastPath = '', stepAt = this.now();
     const fail = message => { const error = new Error('authorization_failed'); error.loginMessage = message; throw error; };
     const once = async (key, fn) => { if (!performed.has(key)) { await fn(); performed.add(key); } };
     while (this.now() < deadline) {
       signal.throwIfAborted();
+      if (authWatch?.problem) { const problem = authWatch.problem; const error = new Error(problem.code); error.loginCode = problem.code; error.loginMessage = problem.message; throw error; }
       const result = await this.service.request(`/api/login/status?session=${login.session}`, 'GET', undefined, 10000);
       if (result.done) {
         if (result.error || !result.account_id) fail(/identity|邮箱|workspace/i.test(result.error || '') ? '授权身份与输入账号不一致，未入库。请重新授权目标账号。' : '授权兑换或保存失败，请检查网络后重新授权。');

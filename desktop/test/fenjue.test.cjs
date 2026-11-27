@@ -27,4 +27,5 @@ test('candy proof subcounts do not conflict with an explicit total', () => {
   assert.equal(candyVerdict('最少取出 29 个糖果。至少需要摸出 9 个圆形。').verdict,'fail');
   assert.equal(candyVerdict('最少需要取出21个。圆形至少9个，五角星形至少5个。').verdict,'pass');
   assert.equal(candyVerdict('答案是21颗。若不能选择形状，答案是29颗。').verdict,'review');
+  assert.equal(candyVerdict('因此最少需要取出：\n\n## **29个**\n\n理由如下。').verdict,'fail');
 });

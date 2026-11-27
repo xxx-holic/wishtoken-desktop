@@ -22,7 +22,13 @@ function loginURL(data) {
 }
 async function loginAction(service, action, input) {
   if (action === 'start' && input === 'fenjue') return service.request('/api/fenjue/login/start', 'POST', {}, 65000);
-  if (action === 'start') return service.request('/api/login/start', 'POST', {channel: channel(input)}, 65000);
+  if (action === 'start') {
+    const type=channel(typeof input==='object'?input?.channel:input);
+    const email=typeof input==='object'?String(input.expected_email||'').trim():'';
+    if(type==='fenjue')return service.request('/api/fenjue/login/start','POST',{},65000);
+    if(email&&(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254))throw new Error('预期邮箱格式不正确');
+    return service.request('/api/login/start', 'POST', {channel:type,...(email?{expected_email:email}:{}),fresh:true}, 65000);
+  }
   const id = session(input);
   if (id.startsWith('fenjue-')) {
     if (action === 'cancel') return service.request(`/api/fenjue/login/cancel?session=${id}`, 'POST', {});

@@ -46,6 +46,8 @@ test('protocol distinguishes edge challenge from invalid password and never cont
   ['/oauth/authorize',{status:403,text:'<html>_cf_chl_opt</html>'},'browser_required'],
   ['/api/accounts/password/verify',{status:401,text:JSON.stringify({error:{code:'incorrect_password'}})},'incorrect_password'],
   ['/api/accounts/password/verify',{status:429,text:''},'rate_limited'],
+  ['/api/accounts/workspace/select',{status:401,text:JSON.stringify({error:{code:'deviceauth_disabled',message:'private-fixture'}})},'deviceauth_disabled'],
+  ['/api/accounts/workspace/select',{status:409,text:JSON.stringify({error:'auth_page_conflict'})},'auth_page_conflict'],
  ]){
   const f=fixture({[path]:()=>response});const driver=new LoginProtocol(f.http,new AbortController().signal,()=>{}, {now:()=>60000});
   await assert.rejects(driver.run(login,{email:'child@example.test',password:'private-fixture',seed:'s'},async a=>a[0],()=> '123456'),e=>e.loginCode===expected&&!e.message.includes('private-fixture'));

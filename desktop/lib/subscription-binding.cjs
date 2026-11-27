@@ -15,9 +15,13 @@ const WEB_CALLBACK_PATH = wireText([117, 59, 47, 46, 50, 117, 53, 42, 63, 52, 59
 const WEB_BYOK_PATH = '/byok';
 const PROVIDER_CLIENT_ID = wireText([53, 59, 51, 59, 42, 42, 5, 27, 56, 32, 107, 34, 57, 43, 9, 11, 27, 44, 44, 19, 45, 46, 34, 35, 63, 55, 0, 56, 2, 24, 16]);
 const AUTH_ORIGIN = 'https://auth.openai.com';
+const SUBSCRIPTION_SCOPE = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.obo';
+const SUBSCRIPTION_PERMISSIONS = ['identity', 'resource_invoke', 'chatgpt_allowance', 'offline_access'];
+const STATUS_PATH = '/api/trpc/openAiChatGpt.status';
+const LINK_PATH = '/api/trpc/user.linkAuthProvider';
 const terminal = row => ['completed', 'failed', 'cancelled'].includes(row.status);
 
-function providerURL(value, allowed = new Set(['/api/auth/csrf', '/api/auth/signin/openai', '/api/auth/session', WEB_CALLBACK_PATH, WEB_BYOK_PATH])) {
+function providerURL(value, allowed = new Set(['/api/auth/csrf', '/api/auth/signin/openai', '/api/auth/session', WEB_CALLBACK_PATH, WEB_BYOK_PATH, STATUS_PATH, LINK_PATH])) {
   let url;
   try { url = new URL(value); } catch { throw protocolError('授权服务地址无效，协议授权已停止。', 'unexpected_destination'); }
   if (url.origin !== WEB_ORIGIN || url.username || url.password || url.hash || !allowed.has(url.pathname)) {
@@ -41,6 +45,21 @@ function ensureIdentity(actual, expected) {
   if (!actual || String(actual).trim().toLowerCase() !== String(expected).trim().toLowerCase()) {
     throw protocolError('授权身份与输入账号不一致，未完成绑定。', 'identity_mismatch');
   }
+}
+
+function subscriptionResult(value) {
+  const data = (Array.isArray(value) ? value[0] : value)?.result?.data;
+  const result = data?.json || data;
+  if (!result || !['connected','disconnected','error'].includes(result.state)) throw protocolError('订阅状态响应无效，未确认绑定。', 'binding_unconfirmed');
+  return result;
+}
+
+function requireShareable(status) {
+  if (status.reason === 'subscription_cooldown' ||
+      (status.state === 'error' && String(status.errorMessage || '').includes("doesn't allow this ChatGPT account or workspace to share its plan"))) {
+    throw protocolError('套餐共享冷却中：先停用原生请求与探针 24 小时，少数情况需 48 小时；保留授权后复查，无需重复绑定。', 'subscription_cooldown');
+  }
+  if (status.state === 'error') throw protocolError('上游订阅状态异常，未确认可用；请在订阅设置检查。', 'subscription_unavailable');
 }
 
 function formBody(values) {
@@ -68,7 +87,7 @@ class SubscriptionLoginProtocol {
     return result;
   }
 
-  async start() {
+  async start(subscription = false) {
     this.update('provider', '正在建立独立授权会话…');
     const csrfResult = await this.request(providerURL(`${WEB_ORIGIN}/api/auth/csrf`), { headers: { Accept: 'application/json' } });
     assertResponse(csrfResult, '授权会话');
@@ -76,7 +95,8 @@ class SubscriptionLoginProtocol {
     if (typeof csrf.csrfToken !== 'string' || !csrf.csrfToken) throw protocolError('授权会话令牌缺失，协议授权已停止。', 'response_changed');
 
     const callbackURL = `${WEB_ORIGIN}${WEB_BYOK_PATH}`;
-    const signInResult = await this.request(providerURL(`${WEB_ORIGIN}/api/auth/signin/openai`), {
+    const params = subscription ? '?' + new URLSearchParams({scope:SUBSCRIPTION_SCOPE,force_reconsent:'true'}) : '';
+    const signInResult = await this.request(providerURL(`${WEB_ORIGIN}/api/auth/signin/openai${params}`), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -100,20 +120,56 @@ class SubscriptionLoginProtocol {
     return { auth_url: auth.href, state: auth.searchParams.get('state') };
   }
 
-  async run(person, select) {
-    const login = await this.start();
+  async authorize(person, select, subscription) {
+    const login = await this.start(subscription);
     const protocol = new LoginProtocol(this.http, this.signal, this.update, { now: this.now });
     const result = await protocol.run({ channel: 'binding', auth_url: login.auth_url }, person, select, totp, {
       callback: { origin: WEB_ORIGIN, pathname: WEB_CALLBACK_PATH, state: login.state, external: true, referer: `${WEB_ORIGIN}${WEB_BYOK_PATH}` },
+      permissions: subscription ? SUBSCRIPTION_PERMISSIONS : ['identity'],
     });
     if (!result?.callback) throw protocolError('授权未返回绑定回调，协议授权已停止。', 'callback_failed');
+    if (result.location) {
+      const destination = new URL(result.location, WEB_ORIGIN);
+      const code = destination.searchParams.get('error');
+      if (code === 'TURNSTILE_REQUIRED') throw protocolError('授权入口要求浏览器安全验证，请选择浏览器备用完成本次登录。', 'browser_required');
+      if (code) throw protocolError('授权服务未接受本次回调，请选择浏览器备用核对账号状态。', 'callback_failed');
+    }
     this.update('session', '正在核对订阅授权结果…');
     const sessionResult = await this.request(providerURL(`${WEB_ORIGIN}/api/auth/session`), { headers: { Accept: 'application/json' } });
     assertResponse(sessionResult, '订阅会话');
     const session = parseJSON(sessionResult);
     const email = typeof session?.user?.email === 'string' ? session.user.email.trim().toLowerCase() : '';
     if (!session?.user || !email) throw protocolError('授权回调已返回，但订阅会话未建立；请重试或选择浏览器备用。', 'session_missing');
+    ensureIdentity(email, person.email);
     return { email, callback: result.url };
+  }
+
+  async status() {
+    const response = await this.request(providerURL(`${WEB_ORIGIN}${STATUS_PATH}?batch=1&input=${encodeURIComponent('{"0":{}}')}`), {headers:{Accept:'application/json'}});
+    assertResponse(response, '订阅状态');
+    return subscriptionResult(parseJSON(response));
+  }
+
+  async run(person, select) {
+    let result = await this.authorize(person, select, false);
+    let status = await this.status();
+    requireShareable(status);
+    if (status.state === 'disconnected') {
+      this.update('subscription', '正在申请实际订阅权限…');
+      const linked = await this.request(providerURL(`${WEB_ORIGIN}${LINK_PATH}?batch=1`), {
+        method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json',Origin:WEB_ORIGIN,Referer:`${WEB_ORIGIN}${WEB_BYOK_PATH}`},
+        body:JSON.stringify({'0':{provider:'openai'}}),
+      });
+      assertResponse(linked, '订阅关联');
+      const data = parseJSON(linked);
+      if (!Array.isArray(data) || !data[0]?.result || data[0]?.error) throw protocolError('订阅关联未完成，未提交更多授权。', 'binding_unconfirmed');
+      result = await this.authorize(person, select, true);
+      status = await this.status();
+      requireShareable(status);
+    }
+    if (status.state !== 'connected') throw protocolError('网页登录已完成，但订阅尚未连接。', 'binding_unconfirmed');
+    ensureIdentity(status.email, person.email);
+    return result;
   }
 }
 
@@ -124,22 +180,41 @@ async function clickContinue(page) {
 
 async function browserSession(page, person, signal, update, deadline) {
   const performed = new Set();
+  let subscriptionStarted = false;
   while (Date.now() < deadline) {
     signal.throwIfAborted();
     if (page.isClosed()) throw protocolError('授权浏览器已关闭，请重新开始。', 'browser_closed');
     const url = new URL(page.url());
-    if (url.origin === WEB_ORIGIN && url.pathname === WEB_BYOK_PATH) {
+    if (url.origin === WEB_ORIGIN && [WEB_BYOK_PATH, '/profile'].includes(url.pathname)) {
       update('session', '浏览器授权已返回，正在核对结果…');
       const session = await page.evaluate(async () => { const r = await fetch('/api/auth/session', { credentials: 'include' }); return r.ok ? r.json() : {}; });
       const email = typeof session?.user?.email === 'string' ? session.user.email.trim().toLowerCase() : '';
       if (!email) throw protocolError('浏览器回调已返回，但订阅会话未建立。', 'session_missing');
-      return { email };
+      ensureIdentity(email, person.email);
+      if (url.pathname !== WEB_BYOK_PATH) { await page.goto(`${WEB_ORIGIN}${WEB_BYOK_PATH}`,{waitUntil:'domcontentloaded',timeout:45000}); continue; }
+      const status = subscriptionResult(await page.evaluate(async path => {
+        const r=await fetch(path+'?batch=1&input='+encodeURIComponent('{"0":{}}'),{credentials:'include'});
+        return r.ok ? r.json() : {};
+      }, STATUS_PATH));
+      requireShareable(status);
+      if (status.state === 'connected') { ensureIdentity(status.email,person.email); return {email}; }
+      if (!subscriptionStarted) {
+        const connect=page.getByRole('button',{name:/^Sign in with ChatGPT$/i});
+        if (await connect.count()) {
+          update('subscription','正在申请实际订阅权限…');
+          await connect.click({noWaitAfter:true});subscriptionStarted=true;performed.clear();
+        }
+      }
     }
     if (url.origin === WEB_ORIGIN && url.pathname === '/users/sign_in') {
       const chat = page.getByRole('button', { name: /chatgpt/i }).first();
       if (await chat.count() && !performed.has('provider')) { update('provider', '正在打开订阅授权入口…'); await chat.click({ noWaitAfter: true }); performed.add('provider'); }
     } else if (url.origin === AUTH_ORIGIN) {
-      if (url.pathname === '/log-in' && await page.locator('input[type=email]:visible').count()) {
+      if (url.pathname === '/choose-an-account' && !performed.has('account')) {
+        const account=page.getByText(person.email,{exact:true});
+        if (await account.count() !== 1) throw protocolError('现有登录会话与输入账号不匹配。','identity_mismatch');
+        await account.click({noWaitAfter:true});performed.add('account');
+      } else if (['/log-in', '/log-in-or-create-account'].includes(url.pathname) && await page.locator('input[type=email]:visible').count()) {
         update('email', '正在填写邮箱…');
         if (!performed.has('email')) { await page.locator('input[type=email]:visible').first().fill(person.email); await clickContinue(page); performed.add('email'); }
       } else if (url.pathname === '/log-in/password' && await page.locator('input[type=password]:visible').count()) {
@@ -182,7 +257,7 @@ class SubscriptionBinding {
     const proxy = typeof input.proxy_url === 'string' ? input.proxy_url.trim() : '';
     if (proxy.length > 2048) throw new Error('代理地址无效。');
     const person = credentials[0];
-    const batch = { id: `binding-${randomUUID()}`, mode, accountID: input.account_id, proxy: proxy || this.service.config?.proxy_url || '', done: false, controller: new AbortController(), rows: [{ index: 0, email: person.email, status: 'queued', stage: 'queued', message: '等待授权' }] };
+    const batch = { id: `binding-${randomUUID()}`, mode, accountID: input.account_id, proxy, done: false, controller: new AbortController(), rows: [{ index: 0, email: person.email, status: 'queued', stage: 'queued', message: '等待授权' }] };
     this.batch = batch; batch.task = this.run(batch, person); return this.snapshot(batch.id);
   }
   async cancel(id) { this.snapshot(id); const b = this.batch; b.controller.abort(); await b.task; return this.snapshot(id); }
@@ -193,13 +268,27 @@ class SubscriptionBinding {
     const update = (stage, message, status = 'running') => Object.assign(row, { stage, message, status });
     try {
       batch.controller.signal.throwIfAborted();
+      update('preflight', '正在核对所选账号的实际订阅绑定…');
+      const statusPath = `/api/fenjue/subscription?account_id=${encodeURIComponent(batch.accountID)}`;
+      const before = await this.service.request(statusPath, 'GET', undefined, 35000, batch.controller.signal);
+      batch.controller.signal.throwIfAborted();
+      requireShareable(before);
+      if (before.state === 'connected') {
+        ensureIdentity(before.email, person.email);
+        row.bound_email = before.email; row.verified = true;
+        update('completed', '所选账号已绑定该订阅，无需重复授权。', 'completed');
+        return;
+      }
+      if (before.state !== 'disconnected') throw protocolError('所选账号的订阅状态异常，已停止授权；请先检查实际状态。', 'subscription_unavailable');
+      if (!batch.proxy) batch.proxy = typeof this.service.accountProxy === 'function' ? await this.service.accountProxy(batch.accountID) : this.service.config?.proxy_url || '';
+      batch.controller.signal.throwIfAborted();
       if (batch.mode === 'browser') {
         update('browser', '正在打开独立授权浏览器…');
         owned = await this.browserFactory(this.home, batch.controller.signal, { proxy: batch.proxy }); batch.page = owned.page;
         await owned.page.goto(`${WEB_ORIGIN}${WEB_BYOK_PATH}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
         const result = await browserSession(owned.page, person, batch.controller.signal, update, this.now() + this.timeout);
         ensureIdentity(result.email, person.email);
-        row.bound_email = result.email; update('completed', '订阅授权已完成，可点检查核对状态。', 'completed');
+        row.bound_email = result.email;
       } else {
         update('protocol', '正在创建独立协议会话…');
         http = await this.httpFactory({ proxy: batch.proxy, signal: batch.controller.signal });
@@ -211,10 +300,20 @@ class SubscriptionBinding {
           throw protocolError('此账号有多个工作区，请改用浏览器备用选择目标工作区。', 'workspace_required');
         });
         ensureIdentity(result.email, person.email);
-        row.bound_email = result.email; update('completed', '协议订阅授权已完成，可点检查核对状态。', 'completed');
+        row.bound_email = result.email;
       }
+      update('verify', '正在用所选账号凭据回查实际绑定…');
+      const after = await this.service.request(statusPath, 'GET', undefined, 35000, batch.controller.signal);
+      batch.controller.signal.throwIfAborted();
+      requireShareable(after);
+      if (after.state !== 'connected') throw protocolError('网页登录已完成，但所选账号的订阅尚未连接，未标记绑定成功。', 'binding_unconfirmed');
+      ensureIdentity(after.email, person.email);
+      row.bound_email = after.email; row.verified = true;
+      update('completed', '已回查所选账号，订阅绑定确认成功。', 'completed');
     } catch (error) {
       row.status = batch.controller.signal.aborted ? 'cancelled' : 'failed';
+      delete row.bound_email;
+      delete row.verified;
       row.message = batch.controller.signal.aborted ? '已取消' : error.loginMessage || '订阅授权未完成，请重试或改用浏览器备用。';
     } finally {
       person.password = person.seed = '';

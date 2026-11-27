@@ -11,6 +11,7 @@ const root=path.resolve(__dirname,'../..');
  try{
   const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await expect(page.locator('#service-label')).toHaveText('本地服务运行中');
+  await require('./feature-license-fixture.cjs').unlockFixture(home);await page.evaluate(()=>refresh());
   await page.evaluate(()=>window.bridge.importText(JSON.stringify([{type:'fenjue',token:'synthetic-fenjue-ui-credential',user_id:'fenjue-fixture',email:'fenjue@example.test',name:'焚诀测试账号'},{type:'codex',access_token:'synthetic-native-ui-credential',account_id:'native-fixture',email:'native@example.test'}])));
   await page.evaluate(()=>refresh());
   await page.locator('#channel').selectOption('fenjue');await expect(page.locator('#model option')).toHaveCount(3);
@@ -21,7 +22,7 @@ const root=path.resolve(__dirname,'../..');
    const old=BridgeService.prototype.request;
    BridgeService.prototype.request=async function(route,...args){
     if(route==='/api/pelican/generate'){globalThis.fenjueBenchmark=args[1];return {text:'最少取出21个糖果。至少需要摸出9个圆形和12个五角星形。',route:'fenjue',response_model:'openai/gpt-6-astra',duration_ms:1234,usage:{input_tokens:183,output_tokens:30,is_byok:true,cost:0}}}
-    if(route.startsWith('/api/fenjue/subscription'))return {state:'connected',email:'linked@example.test'};
+    if(route.startsWith('/api/fenjue/subscription'))return globalThis.fixtureCooldown?{state:'error',reason:'subscription_cooldown'}:{state:'connected',email:'linked@example.test'};
     if(route==='/api/fenjue/login/start')return {session:'fenjue-acc-fixture',active:true,channel:'fenjue',user_code:'DEMO-1234',auth_url:Buffer.from("aHR0cHM6Ly9hcHAua2lsby5haS9kZXZpY2UtYXV0aD9jb2RlPURFTU8tMTIzNA==", "base64").toString("utf8")};
     if(route.startsWith('/api/fenjue/login/status'))return {session:'fenjue-acc-fixture',active:true,done:false,channel:'fenjue',user_code:'DEMO-1234',auth_url:Buffer.from("aHR0cHM6Ly9hcHAua2lsby5haS9kZXZpY2UtYXV0aD9jb2RlPURFTU8tMTIzNA==", "base64").toString("utf8")};
     if(route.startsWith('/api/fenjue/login/cancel')){globalThis.fenjueCancelled=true;return {ok:true}}
@@ -29,6 +30,8 @@ const root=path.resolve(__dirname,'../..');
    };
   });
   await page.locator('#fenjue-setup').click();await expect(page.locator('#fenjue-account option')).toHaveCount(1);await page.locator('#fenjue-check').click();await expect(page.locator('#fenjue-status')).toContainText('linked@example.test');
+  await app.evaluate(()=>{globalThis.fixtureCooldown=true;});await page.locator('#fenjue-check').click();await expect(page.locator('#fenjue-status')).toContainText('24 小时后复查');await expect(page.locator('#fenjue-status')).toContainText('无需重新绑定');
+  await app.evaluate(()=>{globalThis.fixtureCooldown=false;});
   await page.locator('#fenjue-login').click();await expect(page.locator('#fenjue-code')).toHaveValue('DEMO-1234');await page.keyboard.press('Escape');
   await expect.poll(()=>app.evaluate(()=>globalThis.fenjueCancelled)).toBe(true);
   await fs.mkdir(path.join(root,'build/validation'),{recursive:true});await page.screenshot({path:path.join(root,'build/validation/fenjue-settings.png'),fullPage:true});
@@ -41,7 +44,7 @@ const root=path.resolve(__dirname,'../..');
   console.log(JSON.stringify({passed:true,synthetic:true,catalog:true,isolatedProfile:true,deviceCancel:true,subscription:true,candyVerbatim:true,rendererErrors:0}));
  }finally{
   const {BridgeService}=require('../lib/service.cjs');const svc=new BridgeService({home,binary:''});svc.config=JSON.parse(await fs.readFile(path.join(home,'config.json'),'utf8'));await svc.stop();
-  if(process.platform==='win32')require('node:child_process').execFileSync('taskkill.exe',['/PID',String(app.process().pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else app.process().kill('SIGKILL');
+  require('./feature-license-fixture.cjs').stopFixtureProcess(app);
   const resolved=path.resolve(home),base=path.resolve(os.tmpdir())+path.sep;
   if(resolved.startsWith(base)&&path.basename(resolved).startsWith('wishtoken-fenjue-ui-'))await fs.rm(resolved,{recursive:true,force:true,maxRetries:3});
  }

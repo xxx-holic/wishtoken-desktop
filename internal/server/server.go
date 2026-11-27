@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/xxx-holic/wishtoken-desktop/internal/basispoints"
 	"github.com/xxx-holic/wishtoken-desktop/internal/channelname"
 	"github.com/xxx-holic/wishtoken-desktop/internal/config"
+	"github.com/xxx-holic/wishtoken-desktop/internal/featurelicense"
 	"github.com/xxx-holic/wishtoken-desktop/internal/fenjue"
 	"github.com/xxx-holic/wishtoken-desktop/internal/localcodex"
 	"github.com/xxx-holic/wishtoken-desktop/internal/oauth"
@@ -38,9 +40,10 @@ const maxBodyBytes = 64 << 20
 
 // Server is the HTTP front end.
 type Server struct {
-	cfgMu   sync.RWMutex
-	cfg     *config.Config
-	cfgPath string
+	cfgMu          sync.RWMutex
+	cfg            *config.Config
+	cfgPath        string
+	featureLicense *featurelicense.Manager
 
 	Store         *account.Store
 	Pool          *pool.Pool
@@ -61,11 +64,20 @@ type Server struct {
 	loginExpectedEmail string
 	fenjueMu           sync.Mutex
 	fenjueLogin        *fenjueLogin
+	bpsNativeMu        sync.Mutex
+	bpsNativeActive    string
+	bpsNativeCancel    context.CancelFunc
+	bpsNativeDelay     func() time.Duration // deterministic local fixtures only
 }
 
 // New wires the bridge components together.
 func New(cfg *config.Config, cfgPath string, store *account.Store) *Server {
 	s := &Server{cfg: cfg, cfgPath: cfgPath, Store: store, logs: newRecordLog(500), startedAt: time.Now()}
+	home := config.Home()
+	if cfgPath != "" {
+		home = filepath.Dir(cfgPath)
+	}
+	s.featureLicense = featurelicense.New(home)
 	s.Pool = pool.New(store, s.Config)
 	s.Codex = &upstream.CodexClient{Identity: upstream.DefaultIdentity(cfg.CodexClientVersion)}
 	s.Router = &router.Router{
@@ -80,6 +92,9 @@ func New(cfg *config.Config, cfgPath string, store *account.Store) *Server {
 	}
 	s.initCockpit()
 	s.Router.Work = s.workResponses
+	s.Router.BPSNativeReady = s.bpsNativeReady
+	s.Router.FenjueAccess = func() error { return s.featureLicense.Require() }
+	s.Pool.MaintenancePaused = s.bpsNativeMaintenancePaused
 	return s
 }
 
@@ -136,6 +151,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	go s.Pool.RunMaintenance(ctx, s.Codex.Identity)
 	go func() {
 		<-ctx.Done()
+		s.bpsNativeMu.Lock()
+		if s.bpsNativeCancel != nil {
+			s.bpsNativeCancel()
+		}
+		s.bpsNativeMu.Unlock()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)

@@ -5,8 +5,10 @@ async function loadFenjue(preferred) {
   const select = $('fenjue-account'), selected = preferred || select.value || state.selected;
   select.innerHTML = (state.data?.accounts || []).filter(a => a.provider === 'fenjue').map(a => `<option value="${esc(a.id)}">${esc(label(a))}</option>`).join('');
   select.value = selected; if (!select.value) select.selectedIndex = 0;
-  $('fenjue-check').disabled = !select.value;
-  $('fenjue-status').textContent = select.value ? '点击检查，核对已绑定的 ChatGPT 账号和订阅状态。' : '先授权焚诀，或导入 type 为 fenjue 的 JSON。';
+  const unlocked=state.data?.features?.fenjue?.unlocked===true;
+  $('fenjue-check').disabled = !unlocked || !select.value;
+  $('fenjue-status').textContent = !unlocked ? '功能已锁定，请先在上方输入授权码。已有账号凭据保留。' : select.value ? '点击检查，核对已绑定的 ChatGPT 账号和订阅状态。' : '先授权焚诀，或导入 type 为 fenjue 的 JSON。';
+  if(typeof renderFeatureLicense==='function')renderFeatureLicense();
 }
 $('fenjue-setup').onclick = () => action('fenjue-setup', async () => { switchPage('settings'); await loadFenjue(); $('fenjue-settings').scrollIntoView(); });
 $('fenjue-byok').onclick = () => action('fenjue-byok', () => api.fenjueOpen());
@@ -18,7 +20,7 @@ $('fenjue-bind').onclick = () => {
     <p>输入一个账号的账密和 2FA 种子，优先走纯协议授权；遇到页面防护或工作区选择时可切换浏览器备用。</p>
     <label class="field-label" for="binding-mode">授权方式</label>
     <select id="binding-mode" class="full"><option value="protocol">协议授权（首选，不打开浏览器）</option><option value="browser">浏览器备用</option></select>
-    <label class="field-label" for="binding-proxy">本次授权代理（可选）</label><input id="binding-proxy" class="full" spellcheck="false" placeholder="留空使用连接设置中的代理">
+    <label class="field-label" for="binding-proxy">本次授权代理（可选）</label><input id="binding-proxy" class="full" spellcheck="false" placeholder="留空使用所选账号的固定代理">
     <div class="login-input-label"><label class="field-label" for="binding-input">账号资料</label><label><input type="checkbox" id="binding-reveal"> 显示输入</label></div>
     <textarea id="binding-input" class="login-secret" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="邮箱----密码----2FA种子"></textarea>
     <p class="login-hint">密码和种子只在本次授权内存留，完成或取消后立即清空。</p>
@@ -26,7 +28,7 @@ $('fenjue-bind').onclick = () => {
     <section id="binding-results" aria-label="订阅绑定进度" hidden><div class="login-summary"><strong id="binding-summary" role="status"></strong></div><ol id="binding-rows" class="login-queue"></ol></section>
     <div class="modal-actions"><button class="secondary" id="binding-close">取消</button><button class="secondary" id="binding-open" hidden>查看授权浏览器</button><button class="primary" id="binding-start">开始绑定</button></div>`);
   $('modal').setAttribute('aria-labelledby', 'binding-title');
-  $('binding-proxy').value = state.data?.settings?.proxy_url || '';
+  $('binding-proxy').value = '';
   $('binding-reveal').onchange = () => $('binding-input').classList.toggle('login-secret', !$('binding-reveal').checked);
   $('binding-close').onclick = closeModal;
   $('binding-open').onclick = () => action('binding-open', () => api.subscriptionBindingOpen(bindingSession));
@@ -44,7 +46,7 @@ $('fenjue-bind').onclick = () => {
           const row = status.rows?.[0]; $('binding-summary').textContent = status.done ? (row?.status === 'completed' ? '绑定完成' : '绑定未完成') : '正在处理…';
           $('binding-rows').innerHTML = row ? `<li class="login-queue-row" data-status="${esc(row.status)}"><div class="login-row-heading"><strong>${esc(row.email)}</strong><span class="login-state">${esc(row.status === 'completed' ? '已完成' : row.status === 'failed' ? '未完成' : row.status === 'cancelled' ? '已取消' : '处理中')}</span></div><p>${esc(row.message || '')}</p>${row.bound_email ? `<small>已核对：${esc(row.bound_email)}</small>` : ''}${row.cleanup_warning ? `<p class="danger-text">${esc(row.cleanup_warning)}</p>` : ''}</li>` : '';
           $('binding-open').hidden = status.done || status.mode !== 'browser';
-          if (status.done) { bindingSession = null; await loadFenjue(account); if (row?.status === 'completed') toast('订阅协议授权已完成，请检查绑定状态'); return; }
+          if (status.done) { bindingSession = null; await loadFenjue(account); if (row?.status === 'completed') { $('fenjue-status').textContent = `已回查绑定 ${row.bound_email || 'ChatGPT 订阅'}`; toast('所选账号的订阅绑定已确认'); } return; }
           bindingTimer = setTimeout(poll, 800);
         } catch (error) { if (generation === bindingGeneration) { $('binding-error').textContent = error.message; $('binding-error').hidden = false; bindingTimer = setTimeout(poll, 2000); } }
       };
@@ -53,10 +55,10 @@ $('fenjue-bind').onclick = () => {
   };
   $('binding-input').focus();
 };
-$('fenjue-account').onchange = () => { $('fenjue-check').disabled = !$('fenjue-account').value; $('fenjue-status').textContent = '请检查当前账号的订阅绑定。'; };
+$('fenjue-account').onchange = () => { $('fenjue-check').disabled = state.data?.features?.fenjue?.unlocked!==true || !$('fenjue-account').value; $('fenjue-status').textContent = '请检查当前账号的订阅绑定。'; };
 $('fenjue-check').onclick = () => action('fenjue-check', async () => {
   const result = await api.fenjueSubscription($('fenjue-account').value);
-  $('fenjue-status').textContent = result.state === 'connected' ? `已绑定 ${result.email || 'ChatGPT 订阅'}${result.usageLimit ? ' · 有历史限额提示，实际可用性以本次请求为准' : ''}` : result.state === 'disconnected' ? '尚未绑定 ChatGPT；请打开订阅设置完成连接。' : '订阅连接异常；请在焚诀设置重新连接。';
+  $('fenjue-status').textContent = result.state === 'connected' ? `已绑定 ${result.email || 'ChatGPT 订阅'}${result.usageLimit ? ' · 有历史限额提示，实际可用性以本次请求为准' : ''}` : result.reason === 'subscription_cooldown' ? '套餐共享冷却中 · 停用原生请求与探针，24 小时后复查（少数需 48 小时）；保留授权，无需重新绑定。' : result.state === 'disconnected' ? '尚未绑定 ChatGPT；请打开订阅设置完成连接。' : '订阅连接暂不可用；保留授权，请在订阅设置检查状态。';
 });
 $('fenjue-login').onclick = async () => {
   const generation = ++fenjueGeneration;

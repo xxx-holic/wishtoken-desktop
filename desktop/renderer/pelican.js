@@ -25,13 +25,28 @@ async function loadPelican() {
   } catch (e) { toast(e.message, 'error'); }
   finally { pelicanState.loading = false; }
 }
+function pelicanProgress(batch) {
+  if (!batch) return '';
+  const completed = batch.items.filter(item => item.status === 'completed');
+  const running = ['running', 'cancelling'].includes(batch.status);
+  const ended = batch.items.filter(item => !['queued', 'running'].includes(item.status)).length;
+  let text = running ? `${ended} / ${batch.items.length} 已结束 · ${pelicanStatus[batch.status]}` : `${completed.length} / ${batch.items.length} 响应完成`;
+  if (batch.benchmark === 'candy') {
+    const passed = completed.filter(item => item.verdict === 'pass').length;
+    const failed = completed.filter(item => item.verdict === 'fail').length;
+    const review = completed.length - passed - failed;
+    text += ` · 本题通过 ${passed} · 未通过 ${failed}`;
+    if (review) text += ` · 待确认 ${review}`;
+  }
+  return text;
+}
 function renderPelican() {
   const batches = pelicanState.batches;
   const running = batches.find(b => ['running', 'cancelling'].includes(b.status));
   $('pelican-start').disabled = !!running || !pelicanState.selected.size;
   $('pelican-cancel').hidden = !running; $('pelican-cancel').disabled = running?.status === 'cancelling';
   const b = batches.find(b => b.id === pelicanState.batch);
-  $('pelican-progress').textContent = running ? `${running.items.filter(i => !['queued','running'].includes(i.status)).length} / ${running.items.length} 已结束 · ${pelicanStatus[running.status]}` : b ? `${b.items.filter(i => i.status === 'completed').length} / ${b.items.length} 成功` : '';
+  $('pelican-progress').textContent = pelicanProgress(running || b);
   const options = batches.map(b => `<option value="${esc(b.id)}">${date(b.created_at)} · ${b.benchmark==='candy'?'糖果题':'鹈鹕'} · ${channelLabel(b.channel)} · ${esc(b.model)} · ${b.items.length} 个账号 · ${pelicanStatus[b.status]}</option>`).join('');
   if ($('pelican-history').innerHTML !== options) $('pelican-history').innerHTML = options;
   $('pelican-history').value = pelicanState.batch;
@@ -51,6 +66,7 @@ function renderPelican() {
   }
 }
 async function startPelican(input) {
+  if((input?.channel||$('pelican-channel').value)==='fenjue'&&state.data?.features?.fenjue?.unlocked!==true){openFeatureLicense();toast('请先解锁焚诀功能','info');return;}
   await action('pelican-start', async () => { $('pelican-start').disabled = true; pelicanState.batch = await api.pelicanStart(input || { account_ids: [...pelicanState.selected], benchmark:$('pelican-benchmark').value, channel: $('pelican-channel').value, model: $('pelican-model').value, effort: $('pelican-effort').value, prompt: $('pelican-prompt').value, concurrency: Number($('pelican-concurrency').value) }); await loadPelican(); });
 }
 function pelicanChannelOptions() {

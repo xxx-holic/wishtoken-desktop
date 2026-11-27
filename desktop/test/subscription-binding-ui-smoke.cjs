@@ -10,22 +10,43 @@ const root=path.resolve(__dirname,'../..');
  try{
   const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await expect(page.locator('#service-label')).toHaveText('本地服务运行中');
+  await require('./feature-license-fixture.cjs').unlockFixture(home);await page.evaluate(()=>refresh());
   await page.evaluate(()=>window.bridge.importText(JSON.stringify([{type:'fenjue',token:'synthetic-fenjue-binding-ui',user_id:'fixture',email:'binding@example.test',name:'绑定测试账号'}])));
   await page.evaluate(()=>refresh());await page.locator('[data-page="settings"]').click();await expect(page.locator('#fenjue-account option')).toHaveCount(1);
   await app.evaluate(({app})=>{
    const require=process.mainModule.require.bind(process.mainModule),{SubscriptionBinding}=require(require('node:path').join(app.getAppPath(),'lib/subscription-binding.cjs'));
-   SubscriptionBinding.prototype.start=async function(input){globalThis.bindingInput={account_id:input.account_id,mode:input.mode,proxy_url:input.proxy_url,text:input.text};return {id:'binding-fixture',mode:input.mode,account_id:input.account_id,done:false,rows:[{index:0,email:'binding@example.test',status:'queued',stage:'queued',message:'等待授权'}]};};
-   SubscriptionBinding.prototype.snapshot=function(){return {id:'binding-fixture',mode:'protocol',account_id:'fixture',done:true,rows:[{index:0,email:'binding@example.test',status:'completed',stage:'completed',message:'协议订阅授权已完成，可点检查核对状态。',bound_email:'binding@example.test'}]};};
-   SubscriptionBinding.prototype.cancel=async function(){globalThis.bindingCancelled=true;return {id:'binding-fixture',mode:'protocol',account_id:'fixture',done:true,rows:[]};};
+   const {BridgeService}=require(require('node:path').join(app.getAppPath(),'lib/service.cjs'));
+   const start=SubscriptionBinding.prototype.start,request=BridgeService.prototype.request;
+   globalThis.bindingFixtureEmail='different@example.test';globalThis.bindingChecks=0;
+   BridgeService.prototype.request=async function(route,...args){
+    if(route.startsWith('/api/fenjue/subscription?')){globalThis.bindingChecks++;return {state:'connected',email:globalThis.bindingFixtureEmail};}
+    return request.call(this,route,...args);
+   };
+   SubscriptionBinding.prototype.start=async function(input){
+    globalThis.bindingInput={account_id:input.account_id,mode:input.mode,proxy_url:input.proxy_url,text:input.text};
+    this.httpFactory=async()=>{throw Error('preflight must prevent another login');};
+    this.browserFactory=async()=>{throw Error('preflight must prevent browser');};
+    return start.call(this,input);
+   };
   });
+  await page.locator('#fenjue-bind').click();await expect(page.locator('#binding-proxy')).toHaveValue('');
+  await page.locator('#binding-input').fill('binding@example.test----fixture-password----GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');await page.locator('#binding-start').click();
+  await expect(page.locator('#binding-summary')).toHaveText('绑定未完成',{timeout:5000});await expect(page.locator('#binding-input')).toHaveValue('');
+  await expect(page.locator('#binding-rows')).toContainText('授权身份与输入账号不一致');await page.locator('#binding-close').click();
+  await app.evaluate(()=>{globalThis.bindingFixtureEmail='binding@example.test';});
   await page.locator('#fenjue-bind').click();await page.locator('#binding-input').fill('binding@example.test----fixture-password----GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');await page.locator('#binding-proxy').fill('http://127.0.0.1:7890');await page.locator('#binding-start').click();
   await expect(page.locator('#binding-summary')).toHaveText('绑定完成',{timeout:5000});
+  await expect(page.locator('#fenjue-status')).toContainText('已回查绑定 binding@example.test');
+  await expect(page.locator('#binding-input')).toHaveValue('');
   const observed=await app.evaluate(()=>globalThis.bindingInput);if(!observed||observed.mode!=='protocol'||!observed.account_id||observed.proxy_url!=='http://127.0.0.1:7890'||!observed.text.includes('binding@example.test'))throw Error('binding input was not forwarded');
   await fs.mkdir(path.join(root,'build/validation'),{recursive:true});await page.screenshot({path:path.join(root,'build/validation/subscription-binding-ui.png'),fullPage:true});
   if(errors.length)throw Error(errors.join('\n'));
-  console.log(JSON.stringify({passed:true,synthetic:true,protocolDefault:true,proxyForwarded:true,rendererErrors:0}));
+  if(await app.evaluate(()=>globalThis.bindingChecks)!==2)throw Error('unexpected number of subscription checks');
+  console.log(JSON.stringify({passed:true,synthetic:true,realBindingManager:true,identityMismatchRejected:true,verifiedBinding:true,protocolDefault:true,proxyForwarded:true,rendererErrors:0}));
  }finally{
   const {BridgeService}=require('../lib/service.cjs');const svc=new BridgeService({home,binary:''});svc.config=JSON.parse(await fs.readFile(path.join(home,'config.json'),'utf8'));await svc.stop();
-  if(process.platform==='win32')require('node:child_process').execFileSync('taskkill.exe',['/PID',String(app.process().pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else app.process().kill('SIGKILL');
+  require('./feature-license-fixture.cjs').stopFixtureProcess(app);
+  const resolved=path.resolve(home),base=path.resolve(os.tmpdir())+path.sep;
+  if(resolved.startsWith(base)&&path.basename(resolved).startsWith('wishtoken-binding-ui-'))await fs.rm(resolved,{recursive:true,force:true,maxRetries:3});
  }
 })().catch(e=>{console.error(e.message);process.exitCode=1});

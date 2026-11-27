@@ -39,14 +39,16 @@ const (
 
 // Router executes Responses requests.
 type Router struct {
-	Work        func(context.Context, *Request, string) (*Result, *Error)
-	Config      func() *config.Config
-	Pool        *pool.Pool
-	BPS         *upstream.BPSClient
-	Codex       *upstream.CodexClient
-	Fenjue      *fenjue.Client
-	Replay      *basispoints.ReplayCache
-	Attachments *basispoints.AttachmentCache
+	FenjueAccess   func() error
+	BPSNativeReady func(string) error
+	Work           func(context.Context, *Request, string) (*Result, *Error)
+	Config         func() *config.Config
+	Pool           *pool.Pool
+	BPS            *upstream.BPSClient
+	Codex          *upstream.CodexClient
+	Fenjue         *fenjue.Client
+	Replay         *basispoints.ReplayCache
+	Attachments    *basispoints.AttachmentCache
 	// Observer receives one record per attempt (dashboard log). Optional.
 	Observer func(Record)
 }
@@ -205,6 +207,20 @@ func (r *Router) Responses(ctx context.Context, req *Request) (*Result, *Error) 
 	accountID := strings.TrimSpace(req.Headers.Get("X-GPTBridge-Account"))
 	if accountID == "" {
 		accountID = cfg.ActiveAccountID
+	}
+	if req.Headers.Get("X-GPTBridge-Channel") == "bps_native" {
+		if !cfg.DesktopMode || r.BPSNativeReady == nil {
+			return nil, apiErr(403, "primer_required", "BPS → 原生通道需要桌面预热记录")
+		}
+		if err := r.BPSNativeReady(accountID); err != nil {
+			return nil, apiErr(409, "primer_required", err.Error())
+		}
+		copy := *req
+		copy.Headers = req.Headers.Clone()
+		copy.Headers.Set("X-GPTBridge-Channel", RouteCodex)
+		copy.Headers.Set("X-GPTBridge-Account", accountID)
+		copy.Client = req.Client + "/bps-native"
+		req = &copy
 	}
 	body := cloneObject(req.Body)
 	requested := strings.TrimSpace(str(body["model"]))

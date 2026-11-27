@@ -1,5 +1,35 @@
 # 更新记录
 
+## 0.9.0-fenjue-preview.6 — 2026-11-27 (local preview)
+
+- 焚诀功能默认锁定，使用 Ed25519 签名、安装标识绑定及到期校验的功能授权码解锁。登录、导入、订阅检查、绑定、启动和模型请求同时受控，旧别名与直接 API 调用不能绕过；已有账号保留。
+- 提供本地签发工具及使用说明，客户端只内置公钥，私钥不进入仓库、安装包或渲染进程。
+- BPS 手动授权支持预期邮箱核对、完整设备码复制和失败时清除旧设备码。授权后明确显示仍停用的账号，用户可选择启用并准备原糖果题，实际推理仍需明确发起。
+- 设置页增加 BPS 独立授权、静置与复测说明，保留真实案例的前后顺序、原题、通道和结论边界。2026-11-27 的纯 BPS 新样本为 21 且人工核对策略通过；本轮没有原生复测，不据此承诺永久恢复或固定冷却时长。
+
+## 0.9.0-fenjue-preview.5 — 2026-11-26 (local preview)
+
+- 账号管理增加独立授权类型筛选、匹配数量与清除筛选、Ctrl/Cmd+K 搜索、Esc 清空搜索和重绘后键盘焦点保留；启动面板明确显示所选授权类型。
+- 改善列表密度、浅色/深色可读性与窄窗口布局，保留现有启动、导入、测智和会话配置行为。
+- BPS 预热显示三个阶段、逐模型完成数、后台进度和断点恢复。HTTP 200 流内限流与 HTTP 429 一样暂停并等待，成功响应才累计进度。
+- 设备码登录未启用时提供明确错误和安全设置入口；工作区选择不再把错误页的 Retry 当作工作区。
+- 授权、预热成功与能力改善分别验证，不把测试夹具或连接成功当作“降智恢复”证据。
+
+## 0.9.0-fenjue-preview.4 — 2026-11-25 (local preview)
+
+- 新增独立的“BPS → 原生（预热）”通道：核对同账号两套授权与代理，按实时模型准入轮流发送 `hi`，完成后续期原生授权，再启动 Codex App / CLI。
+- 默认 40 条、可调整总数；BPS 使用 low 且省略 service_tier，正式原生请求保留用户设置。完成记录可复用，失败不切换通道，支持停止与断点续跑。
+- 新增原生启动和请求门禁、429 等待、身份或代理变化失效、预热期间暂停额度探针，以及原题测智入口。文档见 `docs/BPS_NATIVE_PREVIEW.md`。
+- 本地模拟上游和桌面界面测试验证流程，不代表真实账号“降智恢复”；此前测试账号的独立订阅冷却未被改动。
+
+## 0.9.0-fenjue-preview.3 — 2026-11-24 (local preview)
+
+- Align the subscription request profile, account-bound session/cache affinity and stateless tool/reasoning history with the supplied reference. Preserve explicit model, effort, cache key, token limit, prompts, tools and images.
+- Reject unavailable server-side history before sending credentials instead of silently dropping it. Distinguish conversations that share a system prefix.
+- Verify the selected subscription identity before and after binding, reuse its configured proxy by default, and prevent a cancelled verification from reporting success.
+- Complete ordinary login and the separate scoped subscription consent, and report callback browser challenges explicitly. Keep credentials during the owner-specified 24-hour sharing cooldown; do not unlink, reauthorize or fall back to paid credits.
+- Add deterministic multi-turn Responses, identity isolation, binding and packaged-UI regressions. Recognize Markdown-heading candy conclusions. Native returned 29 for the supplied sample; paired restoration remains pending the sharing-cooldown recheck.
+
 ## 0.9.0-fenjue-preview.2 — 2026-11-13
 
 - 新增订阅账密协议绑定：输入单行邮箱、密码和 2FA 种子，默认通过独立协议完成 CSRF、OAuth、回调 state、身份和会话校验。

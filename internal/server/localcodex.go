@@ -145,6 +145,9 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.Channel = channel
+	if channel == "fenjue" && !s.requireFenjue(w, r) {
+		return
+	}
 	if (a.Provider == "fenjue") != (channel == "fenjue") {
 		writeError(w, r, 400, "credential_channel_mismatch", "invalid_request_error", "Fenjue requires an independent Fenjue credential")
 		return
@@ -153,9 +156,15 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 400, "fenjue_app_mode", "invalid_request_error", "Fenjue uses an isolated Codex instance; choose isolated mode")
 		return
 	}
-	if channel == "codex" && a.OAuthClientID == account.BPSOAuthClientID {
+	if (channel == "codex" || channel == "bps_native") && a.OAuthClientID == account.BPSOAuthClientID {
 		writeError(w, r, 400, "oauth_channel_mismatch", "invalid_request_error", "此记录是 BPS 授权，请选择同账号的 Codex 授权记录用于原生通道")
 		return
+	}
+	if channel == "bps_native" {
+		if err := s.bpsNativeReady(o.AccountID); err != nil {
+			writeError(w, r, 409, "primer_required", "invalid_request_error", err.Error())
+			return
+		}
 	}
 	o.Speed = req.Speed
 	if channel == "prism" {
@@ -164,11 +173,11 @@ func (s *Server) adminLocalCodex(w http.ResponseWriter, r *http.Request) {
 		o.AccessToken = ""
 		o.AuthAPIURL = ""
 	}
-	if channel == "codex" && !s.Config().DesktopMode {
+	if (channel == "codex" || channel == "bps_native") && !s.Config().DesktopMode {
 		writeError(w, r, 400, "route_policy", "invalid_request_error", "原生启动需要专用桌面客户端")
 		return
 	}
-	if (channel == "bps" && !s.Config().BPSModelAllowed(o.Model)) || (channel == "codex" && !localcodex.NativeModelAllowed(o.Model)) || (channel == "work" && !localcodex.WorkModelAllowed(o.Model)) || (channel == "prism" && !localcodex.PrismModelAllowed(o.Model)) {
+	if (channel == "bps" && !s.Config().BPSModelAllowed(o.Model)) || ((channel == "codex" || channel == "bps_native") && !localcodex.NativeModelAllowed(o.Model)) || (channel == "work" && !localcodex.WorkModelAllowed(o.Model)) || (channel == "prism" && !localcodex.PrismModelAllowed(o.Model)) {
 		writeError(w, r, 400, "model_unavailable", "invalid_request_error", "模型不在所选通道列表中")
 		return
 	}

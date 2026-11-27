@@ -31,3 +31,29 @@ html[data-theme=dark] .login-queue-row[data-status=failed] .login-state,
 html[data-theme=dark] .auto-login-dialog .danger-text{color:#ff9c9c}
 #modal-content .login-footer{flex-wrap:wrap;gap:8px;margin-top:22px}
 @media(max-height:740px){dialog.auto-login-dialog{padding:22px}#modal-content #auto-login-input{height:110px}.login-queue{max-height:36vh}}
+.auth-help{padding:16px;background:var(--accent-soft);margin:14px 0 20px;border-radius:12px}
+#modal-content .auth-help p{font-size:13px;line-height:1.6;margin:6px 0 12px}
+dialog.primer-dialog{width:720px;max-width:calc(100vw - 40px);max-height:calc(100vh - 40px);overflow:auto;padding:28px}
+.primer-dialog :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.primer-stages{display:flex;gap:20px;margin:22px 0;padding:0;list-style:none;counter-reset:primer}
+.primer-stages li{flex:1;font-size:13px;padding-bottom:12px;border-bottom:2px solid var(--line);counter-increment:primer}
+.primer-stages li::before{content:counter(primer) ". ";font-variant-numeric:tabular-nums}
+.primer-stages [data-state=done],.primer-stages [data-state=current]{border-bottom-color:var(--accent)}
+.primer-stages [data-state=current]{font-weight:650;color:var(--accent)}
+.primer-identity{display:grid;grid-template-columns:80px 1fr;gap:6px 12px;margin:16px 0 22px;font-size:13px}
+.primer-identity dt{color:var(--muted)}
+.primer-identity dd{margin:0;overflow-wrap:anywhere}
+.primer-status{display:flex;justify-content:space-between;gap:12px;align-items:baseline;margin-top:24px;font-size:14px}
+#primer-count{white-space:nowrap;font-variant-numeric:tabular-nums}
+#primer-progress{display:block;width:100%;height:8px;margin:12px 0;accent-color:var(--accent)}
+.primer-model-list{list-style:none;padding:0;margin:10px 0;max-height:210px;overflow:auto;scrollbar-color:var(--line) transparent}
+.primer-model-list li{display:grid;grid-template-columns:minmax(0,1fr) 64px 60px;gap:8px;padding:9px 4px;border-bottom:1px solid var(--line);font-size:13px;line-height:1.5}
+.primer-model-list li span:first-child{overflow-wrap:anywhere}
+.primer-model-list li span:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
+.primer-model-list [data-current=true]{font-weight:600;color:var(--accent)}
+.primer-dialog .modal-actions{flex-wrap:wrap;gap:8px}
+#modal-content .primer-dialog p,dialog.primer-dialog #modal-content p{font-size:13px;line-height:1.65;color:var(--text)}
+dialog.primer-dialog #modal-content .danger-text{color:#a92e2e}
+html[data-theme=dark] dialog.primer-dialog #modal-content .danger-text{color:#ffaaaa}
+.primer-model-list [data-current=true]{background:var(--accent-soft)}
+@media(max-width:560px){dialog.primer-dialog{padding:20px}.primer-stages{gap:10px}.primer-stages li{font-size:12px}.primer-identity{grid-template-columns:64px 1fr}}

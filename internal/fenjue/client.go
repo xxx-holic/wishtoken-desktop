@@ -53,6 +53,7 @@ type Subscription struct {
 	Subject     string          `json:"subject,omitempty"`
 	ConnectedAt string          `json:"connectedAt,omitempty"`
 	UsageLimit  json.RawMessage `json:"usageLimit,omitempty"`
+	Reason      string          `json:"reason,omitempty"`
 }
 type Error struct {
 	Status      int
@@ -122,9 +123,13 @@ func (c *Client) send(ctx context.Context, cred Credential, method, target strin
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
 		req.Header.Set(wireValue("WC1LSUxPQ09ERS1GRUFUVVJF"), "cli")
+		req.Header.Set("User-Agent", wireValue("S2lsby1Db2RlLzcuOC4yNyBhaS1zZGsvcHJvdmlkZXItdXRpbHMvNC4wLjQwIHJ1bnRpbWUvYnVuLzEuNC40"))
+		req.Header.Set(wireValue("WC1LSUxPQ09ERS1FRElUT1JOQU1F"), wireValue("S2lsbyBDTEkgNy44LjI3"))
+		req.Header.Set(wireValue("eC1raWxvY29kZS1tb2Rl"), "code")
+		req.Header.Set("HTTP-Referer", wireValue("aHR0cHM6Ly9raWxvY29kZS5haQ=="))
+		req.Header.Set("X-Title", wireValue("S2lsbyBDb2Rl"))
 		if session != "" {
-			key := sha256.Sum256([]byte(cred.AccountID + "\n" + session))
-			session = "ses_" + hex.EncodeToString(key[:16])
+			session = SessionID(cred.AccountID, session)
 			req.Header.Set("X-Session-Id", session)
 			req.Header.Set(wireValue("WC1LSUxPQ09ERS1UQVNLSUQ="), session)
 			req.Header.Set("X-Session-Affinity", session)
@@ -227,6 +232,21 @@ func (c *Client) Status(ctx context.Context, cred Credential) (*Subscription, er
 	if status.State != "connected" && status.State != "disconnected" && status.State != "error" {
 		return nil, &Error{502, "unknown_subscription_state", "subscription"}
 	}
+	status.Reason = ""
+	// This condition is a temporary sharing hold, not an invalid credential.
+	// Expose a stable category without returning arbitrary upstream text.
+	if status.State == "error" {
+		var detail struct {
+			ErrorMessage string `json:"errorMessage"`
+			JSON         struct {
+				ErrorMessage string `json:"errorMessage"`
+			} `json:"json"`
+		}
+		_ = json.Unmarshal(wire.Result.Data, &detail)
+		if strings.Contains(detail.ErrorMessage+detail.JSON.ErrorMessage, "doesn't allow this ChatGPT account or workspace to share its plan") {
+			status.Reason = "subscription_cooldown"
+		}
+	}
 	return &status, nil
 }
 
@@ -264,6 +284,9 @@ func (c *Client) Responses(ctx context.Context, cred Credential, model string, b
 		return nil, err
 	}
 	if status.State != "connected" {
+		if status.Reason == "subscription_cooldown" {
+			return nil, &Error{409, "subscription_cooldown", "subscription"}
+		}
 		return nil, &Error{409, "connect_chatgpt_subscription", "subscription"}
 	}
 	// usageLimit is a historical notice, not a current gate. The server clears

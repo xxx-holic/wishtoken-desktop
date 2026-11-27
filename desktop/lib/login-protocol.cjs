@@ -1,6 +1,7 @@
 'use strict';
 const { randomUUID } = require('node:crypto');
 const { setTimeout: delay, setImmediate: yieldLoop } = require('node:timers/promises');
+const { loginProblem } = require('./login-errors.cjs');
 const AUTH = 'https://auth.openai.com', SENTINEL = 'https://sentinel.openai.com';
 function protocolError(message, code = 'protocol_incomplete') { const error = new Error(code); error.loginMessage = message; error.loginCode = code; return error; }
 function authURL(value) {
@@ -27,6 +28,14 @@ function workspaces(body, cookies = []) {
   }
   const source = candidates.find(x => Array.isArray(x?.workspaces));
   return [...new Map((source?.workspaces || []).filter(x => typeof x.id === 'string').map(w => [w.id,{id:w.id,label:String(w.title || w.name || (w.is_personal ? 'Personal' : '工作区')).slice(0,160)}])).values()];
+}
+function existingSession(html, email) {
+  const matches = [...String(html || '').matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/gi)]
+    .filter(([, attrs, content]) => /\bname=["']session_id["']/i.test(attrs) &&
+      content.replace(/<[^>]*>/g, ' ').split(/\s+/).some(value => value.toLowerCase() === email.toLowerCase()))
+    .map(([, attrs]) => attrs.match(/\bvalue=["']([A-Za-z0-9_-]{1,255})["']/i)?.[1]).filter(Boolean);
+  if (matches.length !== 1) throw protocolError('现有登录会话与输入账号不匹配，请使用浏览器备用核对。', 'identity_mismatch');
+  return matches[0];
 }
 function fnvMix(text) {
   let h = 2166136261;
@@ -78,13 +87,15 @@ class LoginProtocol {
     // checked at every step; a required unsolved challenge is never called success.
     return JSON.stringify({p:proof,t:null,c:challenge.token,id:this.device,flow});
   }
-  async post(path, body, referer, flow) {
-    const headers={'Content-Type':'application/json',Accept:'application/json',Origin:AUTH,Referer:authURL(referer)};
+  async post(path, body, referer, flow, extraHeaders = {}) {
+    const headers={'Content-Type':'application/json',Accept:'application/json',Origin:AUTH,Referer:authURL(referer),...extraHeaders};
     if(flow)headers['openai-sentinel-token']=await this.security(flow);
     const r=await this.request(authURL(path),{method:'POST',headers,body:JSON.stringify(body)});
     let data;try{data=JSON.parse(r.text);}catch{}
-    const code=data?.error?.code;
+    const code=typeof data?.error === 'string' ? data.error : data?.error?.code || data?.code;
     if(r.status<200||r.status>=300){
+      const problem = loginProblem(code);
+      if (problem) throw protocolError(problem.message, problem.code);
       const messages={invalid_username_or_password:'邮箱或密码验证失败，请核对后重试。',incorrect_password:'密码验证失败，请核对后重试。',invalid_password:'密码验证失败，请核对后重试。',invalid_totp:'2FA 验证失败，请检查密钥和系统时间。',incorrect_totp:'2FA 验证失败，请检查密钥和系统时间。',invalid_code:'验证码未通过，请核对后重试。',unsupported_country_region_territory:'当前网络出口地区不受登录服务支持。'};
       throw protocolError(messages[code]||`协议步骤未完成（HTTP ${r.status}），本账号已停止；可重新尝试或选择浏览器备用。`,messages[code]?code:'protocol_rejected');
     }
@@ -151,6 +162,30 @@ class LoginProtocol {
     // This is approval only. AutoLogin still waits for the backend's separate
     // device poll, PKCE exchange and identity-checked store before reporting ready.
   }
+  async grantConsent(page, permissions = ['identity']) {
+    const context = this.context?.oauth_resource_consent?.selection?.context || this.context?.oauth_consent_availability?.context;
+    const inputs = [...String(page.text || '').matchAll(/<input\b[^>]*>/gi)];
+    const sessions = inputs.filter(([tag]) => /\bname=["']auth_session_id["']/i.test(tag))
+      .map(([tag]) => tag.match(/\bvalue=["'](authsess_[A-Za-z0-9]+)["']/i)?.[1]);
+    const session = sessions.length === 1 ? sessions[0] : '';
+    const allowed = new Set(['identity', 'resource_invoke', 'chatgpt_allowance', 'offline_access']);
+    if (!session || !Array.isArray(permissions) || !permissions.length || permissions.some(value => !allowed.has(value))) {
+      throw protocolError('订阅同意页缺少本次会话参数，未提交授权。', 'consent_context_missing');
+    }
+    this.update('consent', '正在确认本次订阅授权权限…');
+    // Ordinary identity consent has no selectable context. Submit exactly the
+    // observed form session; only resource consent carries a permission selection.
+    if (!context) {
+      if (permissions.some(value => value !== 'identity')) throw protocolError('订阅权限上下文缺失，未提交授权。', 'consent_context_missing');
+      return this.post('/api/accounts/consent/grant', {auth_session_id: session}, page.url, 'authorize_continue');
+    }
+    const availability = await this.post('/api/accounts/consent/availability', {auth_session_id: session, context}, page.url, 'authorize_continue',
+      {'openai-consent-decision': 'v1', 'openai-consent-display': 'workspace_name'});
+    if (availability.context !== context) throw protocolError('订阅权限上下文已改变，未提交授权。', 'consent_context_missing');
+    return this.post('/api/accounts/consent/grant', {auth_session_id: session,
+      permission_selection: {context, selected_permissions: permissions,
+        ...(availability.availability_receipt ? {availability_receipt: availability.availability_receipt} : {})}}, page.url, 'authorize_continue');
+  }
   async run(login, person, select, totp, options = {}) {
     const auth=new URL(login.auth_url);
     const redirect=login.channel==='codex'?new URL(auth.searchParams.get('redirect_uri')):options.callback?.origin?new URL(options.callback.origin):null;
@@ -161,8 +196,11 @@ class LoginProtocol {
     for(let step=0;step<16;step++){
       this.signal.throwIfAborted();const p=new URL(page.url).pathname;
       if(p==='/auth/callback'&&callback)return;
-      if(p==='/log-in'||p==='/sign-in'||p==='/u/login/identifier'){
+      if(p==='/log-in'||p==='/log-in-or-create-account'||p==='/sign-in'||p==='/u/login/identifier'){
         this.update('email','协议校验邮箱…');payload=await this.post('/api/accounts/authorize/continue',{username:{value:person.email,kind:'email'}},page.url,'authorize_continue');
+      }else if(p==='/choose-an-account'){
+        this.update('account','正在确认本次授权的账号身份…');
+        payload=await this.post('/api/accounts/session/select',{session_id:existingSession(page.text,person.email)},page.url,'authorize_continue');
       }else if(p==='/log-in/password'){
         this.update('password','协议验证密码…');payload=await this.post('/api/accounts/password/verify',{password:person.password},page.url,'password_verify');
       }else if(p.startsWith('/mfa-challenge')){
@@ -178,7 +216,9 @@ class LoginProtocol {
         if(payload?.['oai-client-auth-session'])this.context=payload['oai-client-auth-session'];
       }else if(p.includes('email-verification')||p.includes('email-otp'))throw protocolError('登录服务另外要求邮箱验证码；当前资料不足，请选择浏览器备用完成。','email_verification_required');
       else if(p.includes('add-phone'))throw protocolError('此账号要求补充手机号，协议授权已停止；可选择浏览器备用处理。','phone_required');
-      else if(p.includes('workspace')||p.includes('consent')){
+      else if(login.channel==='binding'&&p==='/sign-in-with-chatgpt/consent'){
+        payload=await this.grantConsent(page, options.permissions);
+      }else if(p.includes('workspace')||p.includes('consent')){
         const choices=workspaces(this.context,await this.http.cookies(AUTH));
         if(!choices.length)throw protocolError('协议响应中未找到工作区，请使用浏览器备用核对。','workspace_missing');
         const choice=choices.length===1?choices[0]:await select(choices);

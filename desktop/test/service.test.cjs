@@ -10,6 +10,20 @@ const { BridgeService } = require('../lib/service.cjs');
 const binaryPlatform = { win32: 'win', darwin: 'mac', linux: 'linux' }[process.platform];
 const binary = path.resolve(__dirname, '..', 'backend', `${binaryPlatform}-${process.arch}`, process.platform === 'win32' ? 'gptbridge.exe' : 'gptbridge');
 async function freePort() { const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port; }
+test('binding proxy uses the selected private account and never a different account', async t => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'wishtoken-proxy-test-'));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  await fs.writeFile(path.join(home, 'accounts.json'), JSON.stringify({accounts: [
+    {id: 'selected', provider: 'fenjue', proxy_url: 'socks5h://fixture:secret@proxy.test:1080'},
+    {id: 'global', provider: 'fenjue'}, {id: 'native', provider: 'codex'},
+  ]}));
+  const service = new BridgeService({home, binary: ''});
+  service.config = {proxy_url: 'http://global.test:8080'};
+  assert.equal(await service.accountProxy('selected'), 'socks5h://fixture:secret@proxy.test:1080');
+  assert.equal(await service.accountProxy('global'), 'http://global.test:8080');
+  await assert.rejects(service.accountProxy('native'));
+  await assert.rejects(service.accountProxy('missing'));
+});
 test('real sidecar lifecycle, authenticated reuse, strict routing and isolated profile', async t => {
   await fs.access(binary);
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'gptbridge-desktop-test-'));

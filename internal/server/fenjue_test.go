@@ -17,12 +17,14 @@ import (
 )
 
 func TestFenjueResponsesExplicitAccountAndPayload(t *testing.T) {
-	f := newFixture(t, nil, account.Account{ID: "acc-fenjue", Provider: "fenjue", AccountID: "fenjue-fixture", AccessToken: "synthetic-fenjue-credential"}, testAccount("native-fixture", "fixture@example.test"))
+	f := newLicensedFenjueFixture(t, nil, account.Account{ID: "acc-fenjue", Provider: "fenjue", AccountID: "fenjue-fixture", AccessToken: "synthetic-fenjue-credential"}, testAccount("native-fixture", "fixture@example.test"))
 	var posts atomic.Int32
+	var hits atomic.Int32
 	var failed atomic.Bool
 	var sentMu sync.Mutex
 	var sent object
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
 		if r.Header.Get("Authorization") != "Bearer synthetic-fenjue-credential" {
 			t.Error("wrong upstream credential")
 		}
@@ -35,6 +37,9 @@ func TestFenjueResponsesExplicitAccountAndPayload(t *testing.T) {
 			posts.Add(1)
 			var decoded object
 			_ = json.NewDecoder(r.Body).Decode(&decoded)
+			if decoded["prompt_cache_key"] != r.Header.Get("X-Session-Id") || decoded["prompt_cache_key"] == "" {
+				t.Error("body cache identity differs from request session")
+			}
 			sentMu.Lock()
 			sent = decoded
 			sentMu.Unlock()
@@ -100,7 +105,8 @@ func TestFenjueResponsesExplicitAccountAndPayload(t *testing.T) {
 		t.Fatal("legacy model route broke")
 	}
 	before = posts.Load()
-	for _, change := range []object{{"store": true}, {"background": true}, {"service_tier": "priority"}, {"reasoning": object{"effort": "max"}}, {"model": "fenjue-auto/free"}} {
+	hitsBefore := hits.Load()
+	for _, change := range []object{{"store": true}, {"background": true}, {"service_tier": "priority"}, {"reasoning": object{"effort": "max"}}, {"model": "fenjue-auto/free"}, {"previous_response_id": "resp_unavailable"}, {"input": []any{object{"type": "item_reference", "id": "msg_unavailable"}}}} {
 		b := object{}
 		for k, v := range body {
 			b[k] = v
@@ -113,8 +119,8 @@ func TestFenjueResponsesExplicitAccountAndPayload(t *testing.T) {
 			t.Fatal(response.StatusCode)
 		}
 	}
-	if posts.Load() != before {
-		t.Fatal("invalid request sent upstream")
+	if posts.Load() != before || hits.Load() != hitsBefore {
+		t.Fatal("invalid request sent upstream or submitted credentials")
 	}
 	failed.Store(true)
 	resp, _ = post(t, f.api.URL+"/v1/responses", body, h)
@@ -131,8 +137,102 @@ func TestFenjueResponsesExplicitAccountAndPayload(t *testing.T) {
 	}
 }
 
+func TestFenjueStatelessToolContinuationUsesSameIdentityAndEncryptedReasoning(t *testing.T) {
+	f := newLicensedFenjueFixture(t, nil,
+		account.Account{ID: "acc-fenjue-a", Provider: "fenjue", AccountID: "identity-a", AccessToken: "synthetic-token-a"},
+		account.Account{ID: "acc-fenjue-b", Provider: "fenjue", AccountID: "identity-b", AccessToken: "synthetic-token-b"})
+	var posts atomic.Int32
+	var sessionsMu sync.Mutex
+	var sessions []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/trpc/openAiChatGpt.status":
+			fmt.Fprint(w, `{"result":{"data":{"state":"connected","email":"fixture@example.test"}}}`)
+		case "/models":
+			fmt.Fprint(w, `{"data":[{"id":"openai/gpt-6-astra","hasUserByokAvailable":true}]}`)
+		case "/responses":
+			n := posts.Add(1)
+			var body object
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			session := r.Header.Get("X-Session-Id")
+			sessionsMu.Lock()
+			sessions = append(sessions, session)
+			sessionsMu.Unlock()
+			if session == "" || session != body["prompt_cache_key"] || session != r.Header.Get("X-Session-Affinity") {
+				t.Error("session/cache mismatch")
+			}
+			if body["client_metadata"] != nil || body["thread_id"] != nil || body["instructions"] != "unchanged instruction" || body["reasoning"].(map[string]any)["effort"] != "medium" {
+				t.Error("metadata or caller semantics changed")
+			}
+			if n == 2 {
+				items := body["input"].([]any)
+				if len(items) != 4 {
+					t.Error("lost full tool history")
+				} else {
+					reasoning, call, result := items[1].(map[string]any), items[2].(map[string]any), items[3].(map[string]any)
+					if reasoning["encrypted_content"] != "fixture-encrypted-reasoning" || reasoning["id"] != nil || call["id"] != nil || call["synthetic"] != nil || call["arguments"] != "{}" || call["call_id"] != result["call_id"] || result["output"] != "fixture-nonce-111" {
+						t.Error("stateless reasoning or tool result changed")
+					}
+				}
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			if n == 1 {
+				fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"model\":\"openai/gpt-6-astra\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_fixture\",\"summary\":[],\"encrypted_content\":\"fixture-encrypted-reasoning\"},{\"type\":\"function_call\",\"id\":\"fc_fixture\",\"call_id\":\"call_fixture\",\"name\":\"read_fixture\",\"arguments\":\"\"}]}}\n\n")
+			} else {
+				fmt.Fprint(w, textStream("resp_final", "fixture-nonce-111"))
+			}
+		default:
+			t.Error("unexpected endpoint")
+		}
+	}))
+	defer up.Close()
+	f.srv.Router.Fenjue = &fenjue.Client{APIURL: up.URL, GatewayURL: up.URL}
+	body := object{"model": "gpt-6-astra", "reasoning": object{"effort": "medium"}, "instructions": "unchanged instruction", "stream": false,
+		"client_metadata": object{"thread_id": "thread-a"}, "include": []any{"reasoning.encrypted_content"},
+		"tools": []any{object{"type": "function", "name": "read_fixture", "parameters": object{"type": "object"}}},
+		"input": []any{object{"role": "user", "content": "read the fixture"}}}
+	headers := map[string]string{"X-GPTBridge-Account": "acc-fenjue-a", "X-GPTBridge-Channel": "fenjue"}
+	response, raw := post(t, f.api.URL+"/v1/responses", body, headers)
+	var first object
+	if response.StatusCode != 200 || json.Unmarshal([]byte(raw), &first) != nil {
+		t.Fatal("first tool turn did not complete")
+	}
+	output, ok := first["output"].([]any)
+	if !ok || len(output) != 2 {
+		t.Fatal("response did not retain reasoning and function call")
+	}
+	output[1].(map[string]any)["synthetic"] = true
+	items := append(body["input"].([]any), output...)
+	body["input"] = append(items, object{"type": "function_call_output", "call_id": "call_fixture", "output": "fixture-nonce-111"})
+	response, raw = post(t, f.api.URL+"/v1/responses", body, headers)
+	if response.StatusCode != 200 || !strings.Contains(raw, "fixture-nonce-111") {
+		t.Fatal("tool continuation failed")
+	}
+	body["client_metadata"] = object{"thread_id": "thread-b"}
+	response, _ = post(t, f.api.URL+"/v1/responses", body, headers)
+	if response.StatusCode != 200 {
+		t.Fatal("second conversation failed")
+	}
+	body["client_metadata"] = object{"thread_id": "thread-a"}
+	headers["X-GPTBridge-Account"] = "acc-fenjue-b"
+	response, _ = post(t, f.api.URL+"/v1/responses", body, headers)
+	if response.StatusCode != 200 {
+		t.Fatal("second account failed")
+	}
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	if len(sessions) != 4 || sessions[0] != sessions[1] || sessions[0] == sessions[2] || sessions[0] == sessions[3] {
+		t.Fatal("conversation or account isolation lost", sessions)
+	}
+	if f.bpsHits.Load() != 0 || f.codexHit.Load() != 0 {
+		t.Fatal("unexpected channel fallback")
+	}
+}
+
 func TestFenjueCancelledPollCannotPersistGrant(t *testing.T) {
-	f := newFixture(t, nil)
+	f := newLicensedFenjueFixture(t, nil)
 	entered, release := make(chan struct{}), make(chan struct{})
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -190,7 +290,7 @@ func TestFenjueCancelledPollCannotPersistGrant(t *testing.T) {
 }
 
 func TestFenjueDeviceLoginPersistsWithoutExposingCredential(t *testing.T) {
-	f := newFixture(t, nil)
+	f := newLicensedFenjueFixture(t, nil)
 	const secret = "synthetic-fenjue-device-secret"
 	const token = "synthetic-fenjue-credential"
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

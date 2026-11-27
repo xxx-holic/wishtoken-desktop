@@ -7,6 +7,7 @@ const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const accountByID = id => state.data?.accounts.find(account => account.id === id);
 const label = account => account?.name || account?.email || account?.account_id || '未命名账号';
 const planLabel = account => /business|team/i.test(account.plan_type || '') ? 'Business · Team' : (account.plan_type || 'Team').replaceAll('_', ' ');
+const grantType = account => account?.provider === 'fenjue' ? 'fenjue' : account?.oauth_client_id === 'app_fnr0pYvVwwFDocDumLG3H2Bp' ? 'bps' : !account?.oauth_client_id || account.oauth_client_id === 'app_EMoamEEZ73f0CkXaXp7hrann' ? 'codex' : 'other';
 const grantLabel = account => account?.provider === 'fenjue' ? '焚诀授权' : account?.oauth_client_id === 'app_fnr0pYvVwwFDocDumLG3H2Bp' ? 'BPS 授权' : !account?.oauth_client_id || account.oauth_client_id === 'app_EMoamEEZ73f0CkXaXp7hrann' ? 'Codex 授权' : '其他授权';
 function date(value) { if (!value || value.startsWith('0001-')) return '—'; return new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }); }
 function ago(value) { if (!value || value.startsWith('0001-')) return '尚未查询'; const mins = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return mins < 1 ? '刚刚更新' : mins < 60 ? `${mins} 分钟前更新` : `${Math.floor(mins / 60)} 小时前更新`; }
@@ -74,6 +75,10 @@ function quotaHTML(window, fallback) {
 }
 function renderAccounts() {
   const data = state.data; if (!data) return;
+  const focused = document.activeElement?.closest('#account-list .account-card');
+  const focusID = focused?.dataset.id;
+  const focusAction = document.activeElement?.dataset.action;
+  const focusSpeed = document.activeElement?.dataset.speedId;
   $('nav-count').textContent = data.accounts.length;
   $('total-count').textContent = data.accounts.length;
   $('ready-count').textContent = data.accounts.filter(account => visibleStatus(account).key === 'ready').length;
@@ -81,11 +86,14 @@ function renderAccounts() {
   $('current-label').textContent = active ? label(active) : '尚未启动';
   const query = $('search').value.trim().toLowerCase();
   const filter = $('filter').value;
+  const grant = $('grant-filter').value;
   const accounts = data.accounts.filter(account => {
     const status = visibleStatus(account).key;
     const statusMatches = filter === 'all' || status === filter || (filter === 'error' && ['expired', 'no_credentials', 'needs_refresh'].includes(status));
-    return statusMatches && `${label(account)} ${account.email} ${account.account_id}`.toLowerCase().includes(query);
+    return statusMatches && (grant === 'all' || grantType(account) === grant) && `${label(account)} ${account.email} ${account.account_id} ${grantLabel(account)}`.toLowerCase().includes(query);
   });
+  $('account-result-count').textContent = `显示 ${accounts.length} / ${data.accounts.length} 条授权记录`;
+  $('clear-account-filters').hidden = !query && filter === 'all' && grant === 'all';
   const left = a => Math.min(...[a.usage?.primary, a.usage?.secondary].filter(Boolean).map(w => 100 - w.used_percent), 100);
   accounts.sort((a,b) => $('account-sort').value === 'name' ? label(a).localeCompare(label(b)) : $('account-sort').value === 'quota' ? (a.usage ? 0 : 1) - (b.usage ? 0 : 1) || left(b) - left(a) : Number(b.id === data.codex.active_account_id) - Number(a.id === data.codex.active_account_id));
   $('account-list').classList.toggle('compact', $('compact-view').checked);
@@ -93,7 +101,7 @@ function renderAccounts() {
   if ($('quick-account').innerHTML !== options) $('quick-account').innerHTML = options;
   $('quick-account').value = state.selected;
   if (!accounts.length) {
-    $('account-list').innerHTML = data.accounts.length ? empty('没有匹配的账号', '试试其他邮箱、备注或状态。') : empty('把你的 Team 子号带进来', '导入账号 JSON，即可查看额度并启动 Codex。', `<button class="primary" data-action="import">${icon('upload')}导入第一个账号</button>`);
+    $('account-list').innerHTML = data.accounts.length ? empty('没有匹配的账号', '可清除筛选，或调整邮箱、授权类型与状态。') : empty('添加你的第一个账号', '通过授权登录或导入 JSON，开始管理账号与启动 Codex。', `<button class="primary" data-action="import">${icon('upload')}导入账号 JSON</button>`);
     renderSelected(); return;
   }
   $('account-list').innerHTML = accounts.map(account => {
@@ -103,23 +111,29 @@ function renderAccounts() {
     const secondaryLabel = account.usage?.primary?.window_seconds === 604800 ? '其他额度窗口' : '7 天额度';
     const quality = state.data?.status?.quality?.accounts?.[label(account)];
     return `<article class="account-card${selected ? ' selected' : ''}" data-id="${esc(account.id)}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="选择 ${esc(label(account))}">
-      <div class="card-top"><div class="avatar">${esc(label(account).slice(0, 1).toUpperCase())}</div><div class="card-identity"><div class="card-name" title="${esc(label(account))}">${esc(label(account))}</div><div class="card-email" title="${esc(account.account_id)}">${esc(account.name ? account.email : `Team ${account.account_id}`)}</div></div>${selected ? `<span class="card-selected">${icon('check')}</span>` : ''}</div>
+      <div class="card-top"><div class="avatar">${esc(label(account).slice(0, 1).toUpperCase())}</div><div class="card-identity"><div class="card-name" title="${esc(label(account))}">${esc(label(account))}</div><div class="card-email" title="${esc(account.account_id)}">${esc(account.name ? account.email : `工作区 ${account.account_id}`)}</div></div>${selected ? `<span class="card-selected" title="已选中">${icon('check')}</span>` : ''}</div>
       <div class="card-tags"><span class="tag team">${esc(planLabel(account))}</span>${current ? '<span class="tag active">当前启动账号</span>' : ''}<span class="tag">${account.has_refresh_token ? '支持自动续期' : '到期后重新导入'}</span>${account.usage?.limit_reached ? '<span class="tag">额度已用尽</span>' : ''}${quality?.model_mismatches ? `<span class="tag quality-bad" title="最近 ${quality.model_mismatches} 次响应报告的模型名不同，请查看运行记录">模型标识差异</span>` : ''}</div>
       <div class="card-health">${statusHTML(account)}<span>${esc(grantLabel(account))} · ${esc(ago(account.usage?.updated_at))}</span></div>
       <div class="quotas">${quotaHTML(account.usage?.primary, '5 小时额度')}${!account.usage || account.usage.secondary ? quotaHTML(account.usage?.secondary, secondaryLabel) : ''}</div>
       ${warning ? `<div class="card-warning">额度查询失败：${esc(warning)}${account.usage ? '；仍显示上次快照' : ''}</div>` : ''}
       ${account.last_error && account.status !== 'cooldown' && !account.last_error.startsWith('rate limited (') ? `<div class="card-warning">${esc(account.last_error)}</div>` : ''}
-      <div class="card-speed"><span>${icon('bolt')}响应速度</span><select data-speed-id="${esc(account.id)}" aria-label="${esc(label(account))} 响应速度" ${$('channel').value !== 'codex' ? 'disabled title="此通道暂仅支持标准速度"' : ''}><option value="standard" ${accountSpeed(account.id) === 'standard' ? 'selected' : ''}>标准</option><option value="fast" ${accountSpeed(account.id) === 'fast' ? 'selected' : ''}>快速</option></select></div>
+      <div class="card-speed"><span>${icon('bolt')}响应速度</span><select data-speed-id="${esc(account.id)}" aria-label="${esc(label(account))} 响应速度" ${!['codex','bps_native'].includes($('channel').value) ? 'disabled title="此通道暂仅支持标准速度"' : ''}><option value="standard" ${accountSpeed(account.id) === 'standard' ? 'selected' : ''}>标准</option><option value="fast" ${accountSpeed(account.id) === 'fast' ? 'selected' : ''}>快速</option></select></div>
       <div class="card-bottom"><button class="card-launch" data-action="launch" data-id="${esc(account.id)}" ${account.disabled ? 'disabled' : ''}>${icon('arrow')}切换并启动</button><button data-action="pelican" data-id="${esc(account.id)}" title="鹈鹕测智">${icon('bolt')}测智</button><button data-action="usage" data-id="${esc(account.id)}" title="刷新额度">${icon('refresh')}</button><button data-action="edit" data-id="${esc(account.id)}" aria-label="管理 ${esc(label(account))}" title="管理账号">${icon('more')}</button></div>
     </article>`;
   }).join('');
+  if (focusID) {
+    const card = [...$('account-list').querySelectorAll('.account-card')].find(item => item.dataset.id === focusID);
+    const target = focusAction ? [...(card?.querySelectorAll('[data-action]') || [])].find(item => item.dataset.action === focusAction) : focusSpeed ? card?.querySelector('[data-speed-id]') : card;
+    target?.focus({preventScroll:true});
+  }
   renderSelected(); updateButtons();
 }
 function renderSelected() {
   const account = accountByID(state.selected);
-  $('selected-summary').innerHTML = account ? `<strong title="${esc(label(account))}">${esc(label(account))}</strong>${statusHTML(account)}` : '<span class="muted">先从左侧选择一个账号</span>';
+  $('selected-summary').innerHTML = account ? `<strong title="${esc(label(account))}">${esc(label(account))}</strong><span class="selected-grant">${esc(grantLabel(account))} · ${esc(planLabel(account))}</span>${statusHTML(account)}` : '<span class="muted">先从左侧选择一个账号</span>';
   renderSpeed();
   updateButtons();
+  if (typeof refreshBPSNativeSummary === 'function') void refreshBPSNativeSummary();
 }
 function setEffort(effort) {
   state.effort = effort;
@@ -134,18 +148,18 @@ function renderHistory() {
     return `<article class="history-row"><span class="icon-box">${icon('folder')}</span><div class="history-info"><strong>${esc(basename)}</strong><p title="${esc(record.directory)}">${record.target === 'app' ? record.app_mode === 'main' ? '主应用 · 原有项目与会话' : '独立实例 · 单独工作空间' : esc(record.directory)}</p><div class="history-meta"><span>${esc(account ? label(account) : '账号已移除')}</span><span>${channelLabel(record.channel)} · ${esc(record.model)} · ${esc(record.effort)}</span><span>${date(record.last_used)}</span></div></div><div class="history-actions"><button class="secondary" data-history="${esc(record.id)}" data-resume="false" ${disabled}>${record.target === 'app' ? '打开 App' : '新会话'}</button>${record.target === 'app' ? '' : `<button class="primary" data-history="${esc(record.id)}" data-resume="true" ${disabled}>继续会话${icon('arrow')}</button>`}</div></article>`;
   }).join('') : empty('还没有最近项目', '选择账号和项目目录，首次启动后会保存在这里。');
 }
-const channelLabel = channel => ({codex:'原生 Codex',work:'ChatGPT Work',bps:'BPS',fenjue:'焚诀订阅'}[channel] || 'BPS');
+const channelLabel = channel => ({codex:'原生 Codex',bps_native:'BPS → 原生',work:'ChatGPT Work',bps:'BPS',fenjue:'焚诀订阅'}[channel] || 'BPS');
 const speedLabel = speed => speed === 'fast' ? '快速' : '标准';
-function accountSpeed(id) { return $('channel').value !== 'codex' ? 'standard' : state.data?.preferences.account_speeds?.[id] || 'standard'; }
+function accountSpeed(id) { return !['codex','bps_native'].includes($('channel').value) ? 'standard' : state.data?.preferences.account_speeds?.[id] || 'standard'; }
 function renderSpeed() {
   $('speed').value = accountSpeed(state.selected);
-  $('speed').disabled = $('channel').value !== 'codex' || !state.selected;
-  $('speed-hint').textContent = $('channel').value !== 'codex' ? '此通道当前仅支持标准速度。' : '按账号保存；快速模式会发送 priority。能否使用由账号和模型权限决定。';
+  $('speed').disabled = !['codex','bps_native'].includes($('channel').value) || !state.selected;
+  $('speed-hint').textContent = !['codex','bps_native'].includes($('channel').value) ? '此通道当前仅支持标准速度。' : '按账号保存；快速模式会发送 priority。能否使用由账号和模型权限决定。';
 }
 async function saveSpeed(id, speed) { state.data.preferences = await api.preferences({account_speed:{id,speed}}); renderAccounts(); }
 function channelModels(channel, select, preferred) {
   const data = state.data;
-  const models = channel === 'fenjue' ? data.models.fenjue_catalog || [] : channel === 'work' ? data.models.work_catalog : channel === 'prism' ? data.models.prism_catalog : channel === 'codex' ? data.models.native_catalog : data.models.catalog.filter(model => data.models.bps_models.includes(model.id));
+  const models = channel === 'fenjue' ? data.models.fenjue_catalog || [] : channel === 'work' ? data.models.work_catalog : channel === 'prism' ? data.models.prism_catalog : ['codex','bps_native'].includes(channel) ? data.models.native_catalog : data.models.catalog.filter(model => data.models.bps_models.includes(model.id));
   select.innerHTML = (models || []).map(model => `<option value="${esc(model.id)}">${esc(model.display_name)}</option>`).join('');
   select.value = preferred || '';
   if (!select.value) select.selectedIndex = 0;
@@ -156,6 +170,7 @@ function launchChannel(channel, preferred) {
   $('route-label').textContent = `${channelLabel(channel)} 通道`;
   const work=channel==='work', prism=channel==='prism';
   $('fenjue-setup').hidden = channel !== 'fenjue';
+  $('bps-native-setup').hidden = channel !== 'bps_native';
   if (channel === 'fenjue') $('app-mode').value = 'isolated';
   $('work-setup').hidden=!work; $('work-hint').hidden=!work; $('prism-setup').hidden=!prism;
   document.querySelectorAll('[data-effort]').forEach(b=>{ const effort=b.dataset.effort; b.disabled=(effort==='max'&&!work&&!prism)||(effort==='ultra'&&!prism); });
@@ -200,6 +215,7 @@ async function refresh(quiet = false) {
   state.loading = true;
   try {
     const data = await api.snapshot(); state.data = data; state.connected = true;
+    if(typeof renderFeatureLicense==='function')renderFeatureLicense();
     if (!state.initialized) { applyInitial(data); state.initialized = true; }
     if (!accountByID(state.selected)) state.selected = data.accounts.find(account => !account.disabled)?.id || '';
     $('connection-error').hidden = true; $('service-label').textContent = '本地服务运行中'; $('service-dot').classList.remove('danger-text');
@@ -222,8 +238,7 @@ function switchPage(page) {
   state.page = page;
   document.querySelectorAll('.page').forEach(element => element.hidden = element.id !== `page-${page}`);
   document.querySelectorAll('[data-page]').forEach(button => { const current = button.dataset.page === page; button.classList.toggle('active', current); if (current) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
-  $('page-title').textContent = { accounts: 'Team 账号', history: '最近项目', logs: '运行记录', settings: '设置', pelican: '测智对比', business: '商城与合作' }[page];
-  document.querySelector('.eyebrow').hidden = page === 'business';
+  $('page-title').textContent = { accounts: '账号管理', history: '最近项目', logs: '运行记录', settings: '设置', pelican: '测智对比', business: '商城与合作' }[page];
   $('refresh-all').hidden = page !== 'accounts'; $('import-files').hidden = page !== 'accounts';
   $('login-account').hidden = page !== 'accounts';
   if (page === 'history') renderHistory();
@@ -318,7 +333,8 @@ let loginGeneration = 0, activeLogin = null;
 function manualLoginDialog() {
   $('modal').classList.remove('auto-login-dialog');
   $('modal').removeAttribute('aria-labelledby');
-  modal('<h2>授权登录</h2><div class="login-tabs"><button class="secondary" id="login-auto">账密 + 2FA 自动授权</button><button class="secondary" aria-current="page">手动浏览器授权</button></div><p>BPS 和 Codex 是同一账号的两种独立授权。请在浏览器中完成登录，成功后自动导入。</p><div class="modal-actions"><button class="secondary" id="login-codex">Codex 原生授权</button><button class="primary" id="login-bps">BPS 授权</button></div><p id="login-progress" role="status"></p><div id="login-device" hidden><label class="field-label" for="login-code">在授权页输入此设备码</label><input id="login-code" class="full" readonly><p>核对浏览器中显示的账号后完成授权；完成后自动导入。</p></div><div class="modal-actions"><button class="secondary" id="cancel-login">取消</button><button class="primary" id="open-login" hidden>打开授权页</button></div>');
+  modal('<h2>授权登录</h2><div class="login-tabs"><button class="secondary" id="login-auto">账密 + 2FA 自动授权</button><button class="secondary" aria-current="page">手动浏览器授权</button></div><p>BPS 和 Codex 是两种独立授权。BPS 可以直接使用，不必先完成原生授权。</p><label class="field-label" for="login-expected-email">本次授权邮箱（可选，用于核对身份）</label><input id="login-expected-email" class="full" type="email" autocomplete="off" placeholder="留空时请自行核对浏览器账号"><div class="modal-actions"><button class="secondary" id="login-codex">Codex 原生授权</button><button class="primary" id="login-bps">BPS 授权</button></div><p id="login-progress" role="status"></p><div id="login-device" hidden><label class="field-label" for="login-code">在授权页输入此设备码</label><input id="login-code" class="full" readonly><button class="secondary" id="copy-login-code">复制完整设备码</button><p>请整体粘贴，或逐格输入一个字符。核对浏览器中的账号后继续；过期时重新申请。授权成功不代表题目测试通过。</p></div><div class="modal-actions"><button class="secondary" id="cancel-login">取消</button><button class="primary" id="open-login" hidden>打开授权页</button></div>');
+  $('login-expected-email').value=accountByID(state.selected)?.email||'';
   $('login-auto').onclick = loginDialog;
   const generation = ++loginGeneration;
   $('cancel-login').onclick = closeModal;
@@ -327,10 +343,11 @@ function manualLoginDialog() {
     $('login-codex').disabled = $('login-bps').disabled = true;
     $('login-progress').textContent = '正在创建授权…';
     try {
-      const start = await api.loginStart(type);
+      const start = await api.loginStart({channel:type,expected_email:$('login-expected-email').value.trim()});
       if (generation !== loginGeneration) { await api.loginCancel(start.session); return; }
       activeLogin = start.session;
       $('login-code').value = start.user_code || '';
+      $('copy-login-code').onclick=()=>action('copy-login-code',async()=>{await api.loginCopyCode(start.session);toast('设备码已复制，可在授权页整体粘贴');});
       $('login-device').hidden = !start.user_code;
       $('open-login').hidden = false;
       $('open-login').onclick = () => action('login-open', () => api.loginOpen(start.session));
@@ -346,12 +363,15 @@ function manualLoginDialog() {
             if (status.error) throw new Error(status.error);
             if (!status.account_id) throw new Error('授权完成但账号尚未保存');
             state.selected = status.account_id; closeModal(); await refresh(true); renderAccounts();
-            toast(`${type === 'bps' ? 'BPS' : 'Codex'} 授权已保存，请在对应通道测试`); return;
+            if(type==='bps')showSavedBPS(status.account_id);
+            else toast('Codex 授权已保存，请在原生通道测试');
+            return;
           }
           setTimeout(poll, 1500);
         } catch (error) {
           if (generation !== loginGeneration) return;
           $('login-progress').textContent = error.message;
+          $('login-code').value='';$('login-device').hidden=true;
           $('open-login').hidden = true;
           $('login-codex').disabled = $('login-bps').disabled = false;
           $('login-auto').disabled = false;
@@ -374,6 +394,14 @@ function launchOptions() {
 async function launch(resume = false, record) {
   await action('launch', async () => {
     const options = record ? { account_id: record.account_id, app_mode: record.app_mode || 'isolated', channel: record.channel || 'bps', speed:record.speed || 'standard', directory: record.directory, target: record.target || 'cli', model: record.model, effort: record.effort, context_window: record.context_window, compact_limit: record.compact_limit, resume } : { ...launchOptions(), resume };
+    if(options.channel==='fenjue'&&state.data?.features?.fenjue?.unlocked!==true){openFeatureLicense();toast('请先解锁焚诀功能','info');return;}
+    if (options.channel === 'bps_native') {
+      const status = await api.bpsNativeStatus(options.account_id);
+      if (status.job.state !== 'ready') {
+        await openBPSNative(options.account_id, id => launch(resume, {...options, account_id:id}));
+        return;
+      }
+    }
     const result = await api.launch(options);
     if (result.cancelled) return;
     state.selected = options.account_id;
@@ -426,6 +454,13 @@ $('paste-json').onclick = pasteDialog;
 $('modal').addEventListener('close', () => { const input = $('json-text'); if (input) input.value = ''; });
 $('refresh-all').onclick = () => action('refresh-all', async () => { const ids = state.data?.accounts.filter(account => !account.disabled).map(account => account.id) || []; await refreshMany(ids); const failed = ids.filter(id => state.usageErrors.has(id)).length; toast(failed ? `${failed} 个账号查询失败，详情见账号卡片` : '全部额度已更新', failed ? 'error' : 'success'); });
 $('search').oninput = renderAccounts; $('filter').onchange = renderAccounts;
+$('grant-filter').onchange = renderAccounts;
+$('clear-account-filters').onclick = () => { $('search').value = ''; $('filter').value = $('grant-filter').value = 'all'; renderAccounts(); $('search').focus(); };
+document.addEventListener('keydown', event => {
+  if ($('modal').open || $('pelican-preview').open) return;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); switchPage('accounts'); $('search').focus(); $('search').select(); }
+  else if (event.key === 'Escape' && document.activeElement === $('search')) { $('search').value = ''; renderAccounts(); }
+});
 $('account-sort').onchange = renderAccounts; $('compact-view').onchange = () => { renderAccounts(); void api.preferences({compact_view:$('compact-view').checked}); };
 $('restore-on-exit').onchange = () => { void api.preferences({restore_on_exit:$('restore-on-exit').checked}); toast($('restore-on-exit').checked ? '退出时将自动还原 Codex 配置' : '退出时保留当前 Codex 配置'); };
 $('prism-url').onchange = () => { if ($('prism-url').value.trim()) void api.preferences({prism_url:$('prism-url').value.trim()}).catch(error => toast(error.message, 'error')); };

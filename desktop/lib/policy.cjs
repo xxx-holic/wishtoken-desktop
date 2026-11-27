@@ -7,7 +7,7 @@ const PRISM_MODELS = new Set(['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gp
 const PRISM_EFFORTS = new Set(['low', 'medium', 'high', 'max', 'ultra']);
 function cleanChannel(value) {
   const channel = normalizeChannel(value ?? 'bps');
-  if (!['bps', 'codex', 'work', 'prism', 'fenjue'].includes(channel)) throw new Error('请选择 BPS、原生、Work、Prism 或 焚诀 通道');
+  if (!['bps', 'codex', 'bps_native', 'work', 'prism', 'fenjue'].includes(channel)) throw new Error('请选择 BPS、原生、BPS → 原生、Work、Prism 或 焚诀 通道');
   return channel;
 }
 function prismURL(value) {
