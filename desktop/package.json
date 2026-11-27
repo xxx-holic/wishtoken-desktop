@@ -19,7 +19,7 @@
     "smoke": "node test/features-smoke.cjs"
   },
   "dependencies": {
-    "playwright-core": "1.63.0"
+    "playwright-core": "1.65.1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
